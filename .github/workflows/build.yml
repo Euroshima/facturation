@@ -3,11 +3,12 @@ name: Release (Windows exe)
 on:
   push:
     tags:
-      - 'v*'   # se déclenche sur push de tag v1.2.3
+      - "v*"
 
 jobs:
   build-windows:
     runs-on: windows-latest
+
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -15,36 +16,28 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.11"   # 3.13 est trop récent pour PyInstaller parfois
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
+          pip install -r requirements.txt
           pip install pyinstaller
-          pip install -r requirements.txt || echo "no requirements.txt"
 
       - name: Build exe with PyInstaller
-        run: pyinstaller --clean -y main.spec
+        run: |
+          pyinstaller --onefile --noconsole main.py
 
       - name: Compute version from file
-        id: ver
-        shell: pwsh
-        run: |
-          $content = Get-Content "src/core/version.py" -Raw
-          $match = [regex]::Match($content, '__version__\s*=\s*"([^"]+)"')
-          if (-not $match.Success) { throw "Version not found" }
-          echo "version=$($match.Groups[1].Value)" >> $env:GITHUB_OUTPUT
+        id: get_version
+        run: echo "version=$(python -c 'from src.core.version import __version__; print(__version__)')" >> $env:GITHUB_OUTPUT
 
       - name: Rename artifact
-        shell: pwsh
-        run: |
-          $ver = "${{ steps.ver.outputs.version }}"
-          Rename-Item "dist/Facturation.exe" "dist/Facturation-$ver.exe"
+        run: mv dist/main.exe dist/facturation-${{ steps.get_version.outputs.version }}.exe
 
       - name: Upload exe to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/Facturation-${{ steps.ver.outputs.version }}*.exe
+          files: dist/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
