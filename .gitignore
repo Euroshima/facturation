@@ -1,0 +1,50 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environnements virtuels
+.venv/
+venv/
+env/
+ENV/
+
+# Fichiers temporaires
+*.log
+*.tmp
+*.temp
+
+# --- PyInstaller ---
+# Dossiers de build
+/build/
+/dist/
+/*.spec
+
+# --- IDE / éditeurs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Windows / OS ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# --- PDFs générés ---
+/pdfs/
+*.pdf
+
+# --- Données locales ---
+/db.sqlite3
+*.db
+
+# --- Tests ---
+.coverage
+htmlcov/
+.tox/
+pytest_cache/
+.mypy_cache/
+.pytest_cache/
