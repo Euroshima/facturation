@@ -1,16 +1,20 @@
+# src/ui/app.py
 import os, webbrowser
 import tkinter as tk
 from tkinter import ttk, messagebox
 
 from core.settings import CURRENCY, PDF_FOLDER
 from core.db import money
+from core.version import __version__, __app_name__
+from core.updater import check_and_maybe_update
+
 from .tab_create import TabCreate
 from .tab_search import TabSearch
 from .tab_clients import TabClients
 
 
 class App(ttk.Frame):
-    """Contrôleur principal : crée le Notebook + partage l’état/les utilitaires entre onglets."""
+    """Contrôleur principal : Notebook et menu Aide avec vérification des mises à jour."""
     def __init__(self, master):
         super().__init__(master)
         self.pack(fill="both", expand=True)
@@ -18,6 +22,7 @@ class App(ttk.Frame):
         # État partagé
         self.items = []                 # lignes articles courantes (onglet création)
         self.current_invoice_id = None  # id facture en cours d'édition ou None
+
         # Champs client (StringVar partagés entre onglets)
         self.var_c_prenom = tk.StringVar()
         self.var_c_nom = tk.StringVar()
@@ -28,7 +33,17 @@ class App(ttk.Frame):
         self.var_tva = tk.StringVar(value="0")
         self.var_notes = tk.StringVar()
 
-        # Notebook + onglets
+        # --- Menu principal ---
+        menubar = tk.Menu(master)
+        master.config(menu=menubar)
+
+        menu_aide = tk.Menu(menubar, tearoff=0)
+        menu_aide.add_command(label="Vérifier les mises à jour", command=self.check_updates)
+        menu_aide.add_separator()
+        menu_aide.add_command(label=f"À propos de {__app_name__} v{__version__}", command=self.show_about)
+        menubar.add_cascade(label="Aide", menu=menu_aide)
+
+        # --- Notebook + onglets ---
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
 
@@ -41,8 +56,22 @@ class App(ttk.Frame):
         self.tab_clients = TabClients(nb, controller=self)
         nb.add(self.tab_clients, text="Clients")
 
+    # -------- actions menu aide --------
+    def check_updates(self):
+        """Ouvre un dialogue si une nouvelle version GitHub est disponible et propose l'installation."""
+        try:
+            check_and_maybe_update(ask_user=True)
+        except Exception as e:
+            messagebox.showerror("Mise à jour", f"Impossible de vérifier les mises à jour.\n\n{e}")
+
+    def show_about(self):
+        messagebox.showinfo(
+            "À propos",
+            f"{__app_name__}\nVersion : {__version__}\n\nApplication de facturation simple en Tkinter."
+        )
+
     # -------- utilitaires partagés (accessibles par les onglets) --------
-    def money(self, x):  # juste un proxy si tu veux l'appeler côté onglets
+    def money(self, x):
         return money(x)
 
     def open_path(self, path):
@@ -61,11 +90,12 @@ class App(ttk.Frame):
         self.var_tva.set("0")
         self.items.clear()
         self.current_invoice_id = None
+
         if hasattr(self.tab_create, "clear_items_table"):
             self.tab_create.clear_items_table()
         if hasattr(self.tab_create, "refresh_totals"):
             self.tab_create.refresh_totals()
-        # Réactive les bons boutons si l’onglet création a été construit
+
         if hasattr(self.tab_create, "btn_save"):
             self.tab_create.btn_save.config(state="normal")
         if hasattr(self.tab_create, "btn_update"):

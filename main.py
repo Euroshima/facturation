@@ -4,12 +4,36 @@ import sys
 import tkinter as tk
 from tkinter import ttk
 
-# --- Ajouter src/ au PYTHONPATH ---
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(PROJECT_ROOT, "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+# ---------- Bootstrapping du sys.path pour trouver src/core, src/ui, src/pdf ----------
+def _bootstrap_sys_path():
+    """
+    Rendez les imports `core.*`, `ui.*`, `pdf.*` robustes :
+    - en dev: on ajoute <project_root>/src
+    - en .exe (PyInstaller onefile): on tente d'abord _MEIPASS, sinon le dossier de l'exécutable
+    """
+    try:
+        import core  # noqa: F401
+        return  # déjà importable -> rien à faire
+    except Exception:
+        pass
 
+    # Base selon contexte (PyInstaller -> _MEIPASS ou dossier de l'exe ; sinon dossier du fichier)
+    base = getattr(sys, "_MEIPASS", None)
+    if base is None:
+        base = os.path.dirname(os.path.abspath(__file__))
+
+    candidates = [
+        os.path.join(base, "src"),
+        os.path.join(os.path.dirname(sys.executable), "src") if getattr(sys, "frozen", False) else None,
+    ]
+
+    for p in candidates:
+        if p and os.path.isdir(p) and p not in sys.path:
+            sys.path.insert(0, p)
+
+_bootstrap_sys_path()
+
+# ---------- Imports projet (après bootstrap) ----------
 from core.settings import MY_INFO, PDF_FOLDER
 from core.db import init_db, find_or_create_client
 from ui.app import App
@@ -37,7 +61,7 @@ def ensure_my_info_in_db():
 
 def _improve_windows_ui():
     try:
-        from ctypes import windll
+        from ctypes import windll  # type: ignore
         windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
         pass
@@ -50,7 +74,7 @@ def main():
     ensure_my_info_in_db()
 
     root = tk.Tk()
-    root.title("Facturier (tkinter)")
+    root.title(f"{__app_name__} (Tkinter)")
     root.geometry("1200x800")
 
     style = ttk.Style()
