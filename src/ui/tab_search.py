@@ -79,7 +79,13 @@ class TabSearch(ttk.Frame):
 
         # Alimente le tableau des articles
         c.items.clear()
-        self.controller.tab_create.clear_items_table()
+        if hasattr(self.controller.tab_create, "clear_items_table"):
+            self.controller.tab_create.clear_items_table()
+        else:
+            # fallback si la méthode n’existe pas encore
+            for i in self.controller.tab_create.tree.get_children():
+                self.controller.tab_create.tree.delete(i)
+
         for it in items:
             d = {"description": it["description"], "qty": float(it["qty"]), "price": float(it["price"]), "total": float(it["total"])}
             c.items.append(d)
