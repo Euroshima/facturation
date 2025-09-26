@@ -298,22 +298,48 @@ def insert_invoice(client_id, facture_num, date, subtotal, tva, total, notes, it
     finally:
         conn.close()
 
-def update_invoice(invoice_id, client_id, date, subtotal, tva, total, notes, items):
+def update_invoice(invoice_id, client_id=None, date=None, subtotal=None, tva=None, total=None, notes=None, items=None):
     conn = get_conn()
     try:
-        with conn.cursor() as c:
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:
+            # Vérifie que la facture existe
+            c.execute("SELECT * FROM invoices WHERE id=%s", (invoice_id,))
+            invoice = c.fetchone()
+            if not invoice:
+                raise ValueError(f"Facture {invoice_id} introuvable.")
+
+            # Met à jour seulement les champs fournis
+            new_client_id = client_id or invoice["client_id"]
+            new_date = date or invoice["date"]
+            new_subtotal = subtotal if subtotal is not None else invoice["subtotal"]
+            new_tva = tva if tva is not None else invoice["tva"]
+            new_total = total if total is not None else invoice["total"]
+            new_notes = notes if notes is not None else invoice["notes"]
+
             c.execute("""
                 UPDATE invoices
                 SET client_id=%s, date=%s, subtotal=%s, tva=%s, total=%s, notes=%s
                 WHERE id=%s
-            """, (client_id, date, subtotal, tva, total, notes, invoice_id))
-            c.execute("DELETE FROM items WHERE invoice_id=%s", (invoice_id,))
-            for it in items:
-                c.execute("""
-                    INSERT INTO items (invoice_id, description, qty, unit, price, total)
-                    VALUES (%s,%s,%s,%s,%s,%s)
-                """, (invoice_id, it["description"], it["qty"], it.get("unit","kg"), it["price"], it["total"]))
+            """, (new_client_id, new_date, new_subtotal, new_tva, new_total, new_notes, invoice_id))
+
+            # Met à jour les items si fournis
+            if items is not None:
+                # Supprime les anciens
+                c.execute("DELETE FROM items WHERE invoice_id=%s", (invoice_id,))
+                for it in items:
+                    c.execute("""
+                        INSERT INTO items (invoice_id, description, qty, unit, price, total)
+                        VALUES (%s,%s,%s,%s,%s,%s)
+                    """, (
+                        invoice_id,
+                        it["description"],
+                        it["qty"],
+                        it.get("unit", "kg"),
+                        it["price"],
+                        it["total"]
+                    ))
             conn.commit()
+            return invoice_id
     finally:
         conn.close()
 
@@ -332,13 +358,20 @@ def get_invoice_with_items(invoice_id):
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:
             c.execute("SELECT * FROM invoices WHERE id=%s", (invoice_id,))
             inv = c.fetchone()
+            if not inv:
+                print(f"Aucune facture trouvée pour id={invoice_id}")
+                return None, None, []
+
             c.execute("SELECT * FROM clients WHERE id=%s", (inv["client_id"],))
             client = c.fetchone()
+
             c.execute("SELECT * FROM items WHERE invoice_id=%s", (invoice_id,))
             items = c.fetchall()
+
             return inv, client, items
     finally:
         conn.close()
+
 
 def search_invoices(search_term):
     like = "%" + (search_term or "") + "%"
