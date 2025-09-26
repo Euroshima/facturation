@@ -1,4 +1,4 @@
-# pdfgen.py — lignes zebra avec padding vertical, unité intégrée dans quantité, marges égales
+# pdfgen.py — lignes zebra avec padding vertical, unité intégrée dans quantité, marges égales, texte centré verticalement
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
@@ -161,8 +161,11 @@ def create_pdf(invoice, client, items, path):
         pu = float(it["price"])
         tht = float(it["total"])
 
+        # Centrage vertical du texte dans la ligne
+        line_offset = (block_h - row_padding - row_h*len(lines))/2
+
         for i,ln in enumerate(lines):
-            y_line = y - i*row_h - row_h/2 -1
+            y_line = y - row_padding/2 - line_offset - i*row_h - row_h/2 + 2  # +2 ajuste le centrage
             c.setFont(font,9.5)
             c.drawString(col_desc_l+2,y_line,ln)
             if i==0:
