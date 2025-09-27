@@ -7,7 +7,14 @@ from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 # ---------- Connexion ----------
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:ZEquat89p56@localhost:5432/facturation")
+# ---------- Variables de connexion ----------
+DB_HOST = os.getenv("DB_HOST", "192.168.50.250")  # IP du Pi
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "facturation")
+DB_USER = os.getenv("DB_USER", "admin")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "admin")
+
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 def get_conn():
     return psycopg2.connect(DATABASE_URL)
