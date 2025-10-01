@@ -3,7 +3,10 @@ name: Release (Windows exe)
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
+
+permissions:
+  contents: write   # <— donne le droit de publier la release
 
 jobs:
   build-windows:
@@ -16,7 +19,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"   # 3.13 est trop récent pour PyInstaller parfois
+          python-version: "3.13"
 
       - name: Install deps
         run: |
@@ -25,19 +28,23 @@ jobs:
           pip install pyinstaller
 
       - name: Build exe with PyInstaller
-        run: |
-          pyinstaller --onefile --noconsole main.py
+        run: pyinstaller --onefile --noconsole main.py -n Facturation
 
       - name: Compute version from file
-        id: get_version
-        run: echo "version=$(python -c 'from src.core.version import __version__; print(__version__)')" >> $env:GITHUB_OUTPUT
+        id: ver
+        run: |
+          echo "version=$(python -c 'from src.core.version import __version__; print(__version__)')" >> $env:GITHUB_OUTPUT
 
       - name: Rename artifact
-        run: mv dist/main.exe dist/facturation-${{ steps.get_version.outputs.version }}.exe
+        run: |
+          mkdir out
+          mv dist/Facturation.exe out/Facturation-${{ steps.ver.outputs.version }}.exe
 
       - name: Upload exe to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.exe
+          files: out/Facturation-${{ steps.ver.outputs.version }}.exe
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: "Facturation v${{ steps.ver.outputs.version }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
