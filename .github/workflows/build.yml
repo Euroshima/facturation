@@ -28,12 +28,12 @@ jobs:
           pip install pyinstaller
 
       - name: Build exe with PyInstaller
-        run: pyinstaller --onefile --noconsole main.py -n Facturation
+        run: pyinstaller --onefile --noconsole --paths=src --collect-submodules psycopg2 main.py -n Facturation
 
       - name: Compute version from file
         id: ver
         run: |
-          echo "version=$(python -c 'from src.core.version import __version__; print(__version__)')" >> $env:GITHUB_OUTPUT
+          echo "version=$(python -c 'import sys; sys.path.insert(0, \"src\"); from core.version import __version__; print(__version__)')" >> $env:GITHUB_OUTPUT
 
       - name: Rename artifact
         run: |

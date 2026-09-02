@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from core.db import search_clients, get_conn, update_client
+from .widgets import make_sortable
 import psycopg2
 import psycopg2.extras
 
@@ -31,6 +32,7 @@ class TabClients(ttk.Frame):
         ]:
             self.tree.heading(col, text=title)
             self.tree.column(col, width=w, anchor=anchor)
+        make_sortable(self.tree, numeric_columns=("id",))
         self.tree.pack(fill="both", expand=True, padx=6, pady=6)
         self.tree.bind("<Double-1>", lambda e: self._load_selected_into_form())
 
@@ -49,6 +51,7 @@ class TabClients(ttk.Frame):
             self.tree.insert("", "end", values=(
                 r["id"], r["prenom"] or "", r["nom"] or "", r["nom_entreprise"] or "", r["email"] or "", r["telephone"] or ""
             ))
+        self.tree.reapply_sort()
 
     # ---- Charger client sélectionné dans l'onglet création ----
     def _load_selected_into_form(self):

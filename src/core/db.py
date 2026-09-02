@@ -255,6 +255,9 @@ def find_or_create_client(prenom, nom, entreprise, adresse, email, tel):
 
 def search_clients(term, limit=50):
     like = f"%{(term or '').lower()}%"
+    # Recherche téléphone : on compare les chiffres seuls, avec jokers.
+    tel_digits = re.sub(r"\D+", "", term or "")
+    tel_like = f"%{tel_digits}%" if tel_digits else like
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:
@@ -268,7 +271,7 @@ def search_clients(term, limit=50):
                    OR regexp_replace(coalesce(telephone,''), E'\\D+', '', 'g') LIKE %s
                 ORDER BY nom_entreprise IS NULL, nom, prenom
                 LIMIT %s
-            """, (like, like, like, like, term or "", limit))
+            """, (like, like, like, like, tel_like, limit))
             return c.fetchall()
     finally:
         conn.close()
@@ -381,18 +384,24 @@ def get_invoice_with_items(invoice_id):
 
 
 def search_invoices(search_term):
-    like = "%" + (search_term or "") + "%"
+    term = (search_term or "").strip()
+    like = f"%{term}%"
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:
+            # ILIKE = insensible à la casse. Le terme vide renvoie toutes les
+            # factures (y compris celles sans client, filtrables par numéro).
             c.execute("""
                 SELECT invoices.*, clients.prenom, clients.nom, clients.nom_entreprise
                 FROM invoices
                 LEFT JOIN clients ON invoices.client_id = clients.id
-                WHERE clients.prenom LIKE %s OR clients.nom LIKE %s
-                      OR clients.nom_entreprise LIKE %s OR invoices.facture_num LIKE %s
+                WHERE %s = ''
+                   OR coalesce(clients.prenom,'') ILIKE %s
+                   OR coalesce(clients.nom,'') ILIKE %s
+                   OR coalesce(clients.nom_entreprise,'') ILIKE %s
+                   OR coalesce(invoices.facture_num,'') ILIKE %s
                 ORDER BY invoices.date DESC, invoices.id DESC
-            """, (like, like, like, like))
+            """, (term, like, like, like, like))
             return c.fetchall()
     finally:
         conn.close()

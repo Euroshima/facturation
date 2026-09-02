@@ -1,8 +1,8 @@
-import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from core.settings import CURRENCY, PDF_FOLDER
+from core.settings import CURRENCY
+from core.paths import invoice_pdf_path
 from core.db import (
     money,
     find_or_create_client,
@@ -261,14 +261,13 @@ class TabCreate(ttk.Frame):
             subtotal, tva_amount, total = self._collect_totals()
             inv_id = insert_invoice(cid, facture_num, date_str, subtotal, tva_amount, total, self.controller.var_notes.get().strip(), self.items)
 
-            os.makedirs(PDF_FOLDER, exist_ok=True)
-            pdf_path = os.path.join(PDF_FOLDER, f"facture_{facture_num}.pdf")
-
             conn = get_conn()
             cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
             cur.execute("SELECT * FROM clients WHERE id=%s", (cid,))
             client_row = cur.fetchone()
             conn.close()
+
+            pdf_path = invoice_pdf_path(client_row, facture_num)
 
             inv_obj = {
                 "facture_num": facture_num,
@@ -300,7 +299,10 @@ class TabCreate(ttk.Frame):
             subtotal, tva_amount, total = self._collect_totals()
 
             inv, _, _ = get_invoice_with_items(self.current_invoice_id)
+            if not inv:
+                return messagebox.showerror("Modifier", "Facture introuvable en base.")
             original_date = inv["date"]
+            facture_num = inv["facture_num"]
 
             update_invoice(
                 self.current_invoice_id,
@@ -313,17 +315,16 @@ class TabCreate(ttk.Frame):
                 self.items
             )
 
-            os.makedirs(PDF_FOLDER, exist_ok=True)
-            pdf_path = os.path.join(PDF_FOLDER, f"facture_{self.current_invoice_id}.pdf")
-
             conn = get_conn()
             cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
             cur.execute("SELECT * FROM clients WHERE id=%s", (cid,))
             client_row = cur.fetchone()
             conn.close()
 
+            pdf_path = invoice_pdf_path(client_row, facture_num)
+
             inv_obj = {
-                "facture_num": self.current_invoice_id,
+                "facture_num": facture_num,
                 "date": original_date,
                 "subtotal": subtotal,
                 "tva": tva_amount,
@@ -335,7 +336,7 @@ class TabCreate(ttk.Frame):
             create_pdf(inv_obj, client_row, self.items, pdf_path)
             set_pdf_path(self.current_invoice_id, pdf_path)
 
-            messagebox.showinfo("Modification", f"Facture {self.current_invoice_id} mise à jour.")
+            messagebox.showinfo("Modification", f"Facture {facture_num} mise à jour.")
             self.clear_all()
         except Exception as e:
             messagebox.showerror("Erreur", f"Impossible de sauvegarder la facture :\n{e}")

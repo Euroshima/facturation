@@ -2,9 +2,11 @@ import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from core.settings import CURRENCY, PDF_FOLDER
+from core.settings import CURRENCY
+from core.paths import invoice_pdf_path
 from core.db import search_invoices, get_invoice_with_items, set_pdf_path
 from pdf.pdfgen import create_pdf
+from .widgets import make_sortable
 
 class TabSearch(ttk.Frame):
     def __init__(self, master, controller):
@@ -39,6 +41,7 @@ class TabSearch(ttk.Frame):
         ]:
             self.tree.heading(col, text=title)
             self.tree.column(col, width=w, anchor=anchor)
+        make_sortable(self.tree, numeric_columns=("id", "total"))
         self.tree.pack(fill="both", expand=True, padx=6, pady=6)
 
     # ---- Actions ----
@@ -58,6 +61,7 @@ class TabSearch(ttk.Frame):
                 f"{r.get('total',0.0):.2f}",
                 r.get("pdf_path","")
             ))
+        self.tree.reapply_sort()
 
     def _load_selected_for_edit(self):
         sel = self.tree.selection()
@@ -83,7 +87,7 @@ class TabSearch(ttk.Frame):
                 c.controller.var_tva.set(f"{(float(inv.get('tva',0))/float(inv.get('subtotal',1)))*100:.2f}")
             else:
                 c.controller.var_tva.set("0")
-        except:
+        except Exception:
             c.controller.var_tva.set("0")
 
         # Tableau articles
@@ -120,12 +124,14 @@ class TabSearch(ttk.Frame):
             return messagebox.showinfo("PDF","Sélectionne une facture.")
         inv_id = self.tree.item(sel[0], "values")[0]
         inv, client, items = get_invoice_with_items(inv_id)
+        if not inv:
+            return messagebox.showerror("PDF", "Facture introuvable en base.")
 
-        pdf_path = os.path.join(PDF_FOLDER, f"facture_{inv['facture_num']}.pdf")
+        pdf_path = invoice_pdf_path(client, inv["facture_num"])
         items_dict = [{"description": it["description"], "qty": float(it["qty"]), "price": float(it["price"]), "unit": it.get("unit","kg"), "total": float(it["total"])} for it in items]
         try:
             tva_rate = (float(inv.get("tva",0)) / float(inv.get("subtotal",1))) * 100 if inv.get("subtotal") else 0.0
-        except:
+        except Exception:
             tva_rate = 0.0
 
         inv_obj = {
