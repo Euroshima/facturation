@@ -28,7 +28,7 @@ jobs:
           pip install pyinstaller
 
       - name: Build exe with PyInstaller
-        run: pyinstaller --onefile --noconsole --paths=src --collect-submodules psycopg2 main.py -n Facturation
+        run: pyinstaller --onefile --noconsole --paths=src --collect-submodules psycopg2 --add-data "CHANGELOG.md;." main.py -n Facturation
 
       - name: Compute version from tag
         id: ver

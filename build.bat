@@ -24,6 +24,7 @@ py -m PyInstaller ^
     --noconsole ^
     --paths=src ^
     --collect-submodules psycopg2 ^
+    --add-data "CHANGELOG.md;." ^
     --name=Facturation ^
     main.py
 

@@ -7,6 +7,7 @@ from core.settings import CURRENCY, PDF_FOLDER
 from core.db import money
 from core.version import __version__, __app_name__
 from core.updater import check_and_maybe_update, start_auto_update
+from core.changelog import load_changelog
 
 from .tab_create import TabCreate
 from .tab_search import TabSearch
@@ -40,12 +41,20 @@ class App(ttk.Frame):
         menu_aide = tk.Menu(menubar, tearoff=0)
         menu_aide.add_command(label="Vérifier les mises à jour", command=self.check_updates)
         menu_aide.add_separator()
-        menu_aide.add_command(label=f"À propos de {__app_name__} v{__version__}", command=self.show_about)
+        menu_aide.add_command(label="Notes de version", command=self.show_changelog)
         menubar.add_cascade(label="Aide", menu=menu_aide)
+
+        # --- Barre d'état (version en bas à gauche) : packée avant le notebook
+        #     pour rester ancrée en bas même quand le notebook s'étend ---
+        statusbar = ttk.Frame(self, relief="sunken")
+        statusbar.pack(side="bottom", fill="x")
+        ttk.Label(
+            statusbar, text=f"{__app_name__}  v{__version__}", anchor="w", padding=(6, 2)
+        ).pack(side="left")
 
         # --- Notebook + onglets ---
         nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=8, pady=8)
+        nb.pack(side="top", fill="both", expand=True, padx=8, pady=8)
 
         self.tab_create = TabCreate(nb, controller=self)
         nb.add(self.tab_create, text="Créer / Éditer facture")
@@ -67,11 +76,26 @@ class App(ttk.Frame):
         except Exception as e:
             messagebox.showerror("Mise à jour", f"Impossible de vérifier les mises à jour.\n\n{e}")
 
-    def show_about(self):
-        messagebox.showinfo(
-            "À propos",
-            f"{__app_name__}\nVersion : {__version__}\n\nApplication de facturation simple en Tkinter."
-        )
+    def show_changelog(self):
+        """Fenêtre défilante avec le journal des versions (CHANGELOG.md)."""
+        win = tk.Toplevel(self)
+        win.title(f"Notes de version — {__app_name__} v{__version__}")
+        win.geometry("640x520")
+        win.transient(self.winfo_toplevel())
+
+        frame = ttk.Frame(win, padding=8)
+        frame.pack(fill="both", expand=True)
+
+        text = tk.Text(frame, wrap="word", font=("TkDefaultFont", 10), padx=8, pady=8)
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        text.pack(side="left", fill="both", expand=True)
+
+        text.insert("1.0", load_changelog())
+        text.configure(state="disabled")
+
+        ttk.Button(win, text="Fermer", command=win.destroy).pack(pady=(0, 8))
 
     # -------- utilitaires partagés (accessibles par les onglets) --------
     def money(self, x):

@@ -106,87 +106,18 @@ def _ask_yesno(title: str, msg: str) -> bool:
         return False
 
 
-def check_and_maybe_update(ask_user: bool = True):
-    """
-    Vérifie la dernière version GitHub et propose d'installer.
-    - Si packagé (.exe PyInstaller) : lance le nouvel exe et ferme l'app.
-    - Sinon : ouvre le dossier du fichier téléchargé.
-    """
-    try:
-        latest = _fetch_latest_release()
-        if not latest:
-            if ask_user:
-                _show_error("Mise à jour", "Impossible de récupérer la dernière version.")
-            return
-
-        remote_tag = latest.get("tag_name") or latest.get("name") or ""
-        if not _is_newer(remote_tag, __version__):
-            if ask_user:
-                _show_info("Mise à jour", f"Aucune mise à jour disponible.\nVersion actuelle : v{__version__}")
-            return
-
-        # Trouver l'asset .exe
-        picked = _pick_asset(latest)
-        if not picked:
-            if ask_user:
-                _show_error("Mise à jour", "Aucun binaire (.exe) trouvé dans la dernière release.")
-            return
-
-        asset_name, asset_url = picked
-
-        if not ask_user or _ask_yesno(
-            "Mise à jour disponible",
-            f"Nouvelle version trouvée : {remote_tag}\n"
-            f"Version actuelle : v{__version__}\n\n"
-            "Voulez-vous télécharger et installer maintenant ?"
-        ):
-            # Téléchargement vers un dossier temp
-            dest = os.path.join(tempfile.gettempdir(), asset_name)
-            try:
-                _download(asset_url, dest)
-            except urllib.error.URLError as e:
-                _show_error("Mise à jour", f"Échec du téléchargement :\n{e}")
-                return
-
-            # Lance l'exe téléchargé
-            try:
-                if sys.platform.startswith("win"):
-                    os.startfile(dest)  # type: ignore[attr-defined]
-                else:
-                    # Au cas où on build aussi pour d'autres plateformes
-                    os.spawnlp(os.P_NOWAIT, "open" if sys.platform == "darwin" else "xdg-open", "open", dest)
-            except Exception as e:
-                _show_error("Mise à jour", f"Impossible de lancer l'installateur :\n{e}")
-                return
-
-            # Si l'app est packagée, on ferme l'appli pour laisser l'installateur faire son job
-            if getattr(sys, "frozen", False):
-                _show_info("Mise à jour", "L'installateur a été lancé. L'application va se fermer.")
-                os._exit(0)  # arrêt immédiat du processus
-            else:
-                # En dev, on laisse l'appli ouverte et on ouvre le dossier
-                try:
-                    folder = os.path.dirname(dest)
-                    if sys.platform.startswith("win"):
-                        os.startfile(folder)  # type: ignore[attr-defined]
-                    else:
-                        os.spawnlp(os.P_NOWAIT, "open" if sys.platform == "darwin" else "xdg-open", "open", folder)
-                except Exception:
-                    pass
-                _show_info("Mise à jour", f"Fichier téléchargé dans :\n{dest}")
-
-    except Exception as e:
-        if ask_user:
-            _show_error("Mise à jour", f"Une erreur est survenue :\n{e}")
-
-
 # ==========================================================================
-#  Mise à jour AUTOMATIQUE au démarrage (packagé Windows uniquement)
+#  Mécanisme de remplacement de l'exe (partagé auto / manuel)
 # ==========================================================================
 
 def _current_exe_path() -> str:
     """Chemin de l'exe en cours d'exécution (PyInstaller onefile)."""
     return sys.executable
+
+
+def _staged_exe_path() -> str:
+    """Emplacement du téléchargement, à côté de l'exe courant."""
+    return os.path.join(os.path.dirname(_current_exe_path()), "Facturation.update.exe")
 
 
 def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
@@ -218,9 +149,112 @@ def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
     return bat
 
 
+def _stage_new_exe(asset_url: str) -> str:
+    """Télécharge le nouvel exe à côté de l'actuel. Retourne son chemin.
+    Lève une exception si le téléchargement échoue ou paraît invalide."""
+    new_exe = _staged_exe_path()
+    _download(asset_url, new_exe)
+    if os.path.getsize(new_exe) < 1_000_000:
+        raise RuntimeError("fichier téléchargé invalide")
+    return new_exe
+
+
+def _swap_and_restart(remote_tag: str, new_exe: str):
+    """À exécuter sur le thread UI : prévient, lance le script de remplacement
+    puis coupe le process. En cas d'échec, nettoie et prévient l'utilisateur."""
+    try:
+        old_exe = _current_exe_path()
+        _show_info(
+            "Mise à jour",
+            f"Mise à jour vers {remote_tag} téléchargée.\n"
+            "L'application va se fermer puis redémarrer automatiquement.",
+        )
+        _write_swap_script(os.getpid(), old_exe, new_exe)
+        bat = os.path.join(tempfile.gettempdir(), "facturation_update.bat")
+        subprocess.Popen(
+            ["cmd", "/c", bat],
+            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            close_fds=True,
+        )
+        os._exit(0)
+    except Exception as e:
+        try:
+            if os.path.exists(new_exe):
+                os.remove(new_exe)
+        except Exception:
+            pass
+        _show_error(
+            "Mise à jour",
+            f"La mise à jour a échoué :\n{e}\n\n"
+            "L'application continue sur la version actuelle.",
+        )
+
+
+# ==========================================================================
+#  Vérification MANUELLE (menu Aide)
+# ==========================================================================
+
+def check_and_maybe_update(ask_user: bool = True):
+    """Vérifie la dernière release GitHub et, si plus récente, propose de
+    l'installer (téléchargement + remplacement de l'exe + redémarrage).
+    Appelée depuis le thread UI."""
+    if not getattr(sys, "frozen", False):
+        if ask_user:
+            _show_info(
+                "Mise à jour",
+                "La mise à jour n'est disponible que dans la version installée (.exe).\n"
+                f"Version actuelle : v{__version__}",
+            )
+        return
+    if not sys.platform.startswith("win"):
+        if ask_user:
+            _show_info("Mise à jour", "Mise à jour non prise en charge sur cette plateforme.")
+        return
+
+    try:
+        latest = _fetch_latest_release()
+        if not latest:
+            if ask_user:
+                _show_error("Mise à jour", "Impossible de récupérer la dernière version.")
+            return
+
+        remote_tag = latest.get("tag_name") or latest.get("name") or ""
+        if not _is_newer(remote_tag, __version__):
+            if ask_user:
+                _show_info("Mise à jour", f"Vous êtes à jour.\nVersion actuelle : v{__version__}")
+            return
+
+        picked = _pick_asset(latest)
+        if not picked:
+            if ask_user:
+                _show_error("Mise à jour", "Aucun binaire (.exe) trouvé dans la dernière release.")
+            return
+        _, asset_url = picked
+
+        if ask_user and not _ask_yesno(
+            "Mise à jour disponible",
+            f"Nouvelle version : {remote_tag}\n"
+            f"Version actuelle : v{__version__}\n\n"
+            "Télécharger et installer maintenant ?",
+        ):
+            return
+
+        new_exe = _stage_new_exe(asset_url)
+        _swap_and_restart(remote_tag, new_exe)
+
+    except Exception as e:
+        if ask_user:
+            _show_error("Mise à jour", f"Une erreur est survenue :\n{e}")
+
+
+# ==========================================================================
+#  Mise à jour AUTOMATIQUE au démarrage (packagé Windows uniquement)
+# ==========================================================================
+
 def _auto_update_worker(root):
-    """Exécuté dans un thread : vérifie + télécharge en arrière-plan, puis
-    revient sur le thread UI pour fermer/relancer l'application."""
+    """Thread : vérifie + télécharge en arrière-plan, puis revient sur le
+    thread UI pour fermer/relancer l'application."""
     try:
         latest = _fetch_latest_release()
         if not latest:
@@ -232,46 +266,14 @@ def _auto_update_worker(root):
         if not picked:
             return
         _, asset_url = picked
-
-        old_exe = _current_exe_path()
-        new_exe = os.path.join(os.path.dirname(old_exe), "Facturation.update.exe")
-        _download(asset_url, new_exe)
-        if os.path.getsize(new_exe) < 1_000_000:
-            raise RuntimeError("fichier téléchargé invalide")
+        new_exe = _stage_new_exe(asset_url)
     except Exception:
         # Hors ligne, release inaccessible, dossier non inscriptible… :
         # on ne dérange pas l'utilisateur, l'app continue normalement.
         return
 
-    def _finish():
-        try:
-            _show_info(
-                "Mise à jour",
-                f"Mise à jour vers {remote_tag} téléchargée.\n"
-                "L'application va se fermer puis redémarrer automatiquement.",
-            )
-            bat = _write_swap_script(os.getpid(), old_exe, new_exe)
-            subprocess.Popen(
-                ["cmd", "/c", bat],
-                creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
-                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-                close_fds=True,
-            )
-            os._exit(0)
-        except Exception as e:
-            try:
-                if os.path.exists(new_exe):
-                    os.remove(new_exe)
-            except Exception:
-                pass
-            _show_error(
-                "Mise à jour",
-                f"La mise à jour automatique a échoué :\n{e}\n\n"
-                "L'application continue sur la version actuelle.",
-            )
-
     try:
-        root.after(0, _finish)
+        root.after(0, lambda: _swap_and_restart(remote_tag, new_exe))
     except Exception:
         pass
 
@@ -289,7 +291,7 @@ def start_auto_update(root):
         return
     # Nettoie un éventuel téléchargement resté d'une tentative précédente échouée
     try:
-        leftover = os.path.join(os.path.dirname(_current_exe_path()), "Facturation.update.exe")
+        leftover = _staged_exe_path()
         if os.path.exists(leftover):
             os.remove(leftover)
     except Exception:
