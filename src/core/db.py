@@ -9,19 +9,22 @@ from .dbconfig import database_url
 
 # ---------- Connexion ----------
 # Les identifiants ne sont plus dans le code : voir core/dbconfig.py
-# (fichier db_config.ini ou variables d'environnement DB_*).
-try:
-    DATABASE_URL = database_url()
-    _CONFIG_ERROR = None
-except Exception as e:  # config absente/incomplète : erreur reportée à get_conn()
-    DATABASE_URL = None
-    _CONFIG_ERROR = e
-
+# (fichier de config écrit par l'app, ou variables d'environnement DB_*).
 
 def get_conn():
-    if _CONFIG_ERROR is not None:
-        raise _CONFIG_ERROR
-    return psycopg2.connect(DATABASE_URL)
+    """Ouvre une connexion. Relit la config à chaque appel : une modification
+    dans les paramètres est prise en compte sans redémarrer."""
+    return psycopg2.connect(database_url())
+
+
+def try_connect(url: str):
+    """Teste une URL de connexion. Retourne (True, "") ou (False, message)."""
+    try:
+        conn = psycopg2.connect(url, connect_timeout=5)
+        conn.close()
+        return True, ""
+    except Exception as e:
+        return False, str(e).strip()
 
 # ---------- Normalisation ----------
 def _norm_text(s: str) -> str:

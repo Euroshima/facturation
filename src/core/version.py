@@ -1,3 +1,3 @@
 # src/core/version.py
-__app_name__ = "Facturation"
-__version__  = "1.0.8"
+__app_name__ = "Hytris Facturation"
+__version__  = "1.0.9"

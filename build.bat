@@ -25,6 +25,8 @@ py -m PyInstaller ^
     --paths=src ^
     --collect-submodules psycopg2 ^
     --add-data "CHANGELOG.md;." ^
+    --add-data "assets;assets" ^
+    --icon "assets/hytris.ico" ^
     --name=Facturation ^
     main.py
 

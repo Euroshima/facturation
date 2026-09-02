@@ -12,6 +12,7 @@ from core.changelog import load_changelog
 from .tab_create import TabCreate
 from .tab_search import TabSearch
 from .tab_clients import TabClients
+from .db_config_dialog import show_db_config_dialog
 
 
 class App(ttk.Frame):
@@ -37,6 +38,10 @@ class App(ttk.Frame):
         # --- Menu principal ---
         menubar = tk.Menu(master)
         master.config(menu=menubar)
+
+        menu_param = tk.Menu(menubar, tearoff=0)
+        menu_param.add_command(label="Connexion à la base de données…", command=self.edit_db_config)
+        menubar.add_cascade(label="Paramètres", menu=menu_param)
 
         menu_aide = tk.Menu(menubar, tearoff=0)
         menu_aide.add_command(label="Vérifier les mises à jour", command=self.check_updates)
@@ -68,7 +73,14 @@ class App(ttk.Frame):
         # Vérifie et installe automatiquement une nouvelle version (exe Windows uniquement)
         start_auto_update(master)
 
-    # -------- actions menu aide --------
+    # -------- actions menu --------
+    def edit_db_config(self):
+        if show_db_config_dialog(self.winfo_toplevel()):
+            messagebox.showinfo(
+                "Paramètres",
+                "Connexion enregistrée. Elle sera utilisée dès la prochaine requête.",
+            )
+
     def check_updates(self):
         """Ouvre un dialogue si une nouvelle version GitHub est disponible et propose l'installation."""
         try:

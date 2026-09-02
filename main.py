@@ -35,8 +35,11 @@ _bootstrap_sys_path()
 
 # ---------- Imports projet (après bootstrap) ----------
 from core.settings import MY_INFO, PDF_FOLDER
-from core.db import init_db, find_or_create_client
+from core.db import init_db, find_or_create_client, try_connect
+from core.dbconfig import database_url
 from ui.app import App
+from ui.db_config_dialog import show_db_config_dialog
+from ui.appicon import apply_icon
 from core.version import __version__, __app_name__
 
 
@@ -67,12 +70,41 @@ def _improve_windows_ui():
         pass
 
 
+def _db_reachable():
+    """(ok, message)."""
+    try:
+        return try_connect(database_url())
+    except Exception as e:
+        return False, str(e)
+
+
+def _ensure_db_configured(root):
+    """Tant que la BDD n'est pas joignable, propose la fenêtre de config.
+    Retourne True si on peut continuer, False si l'utilisateur abandonne."""
+    ok, _ = _db_reachable()
+    while not ok:
+        if not show_db_config_dialog(root, first_run=True):
+            return False
+        ok, err = _db_reachable()
+        if not ok and not messagebox.askretrycancel(
+            f"{__app_name__} — base de données",
+            f"Connexion toujours impossible :\n{err}",
+        ):
+            return False
+    return True
+
+
 def main():
     _improve_windows_ui()
     ensure_dirs()
 
     root = tk.Tk()
     root.withdraw()
+    apply_icon(root)
+
+    if not _ensure_db_configured(root):
+        root.destroy()
+        return
 
     try:
         init_db()
@@ -80,14 +112,13 @@ def main():
     except Exception as e:
         messagebox.showerror(
             f"{__app_name__} — base de données",
-            "Impossible de se connecter à la base de données.\n\n"
-            f"{e}",
+            f"Erreur d'initialisation de la base :\n\n{e}",
         )
         root.destroy()
         return
 
     root.deiconify()
-    root.title(f"{__app_name__} (Tkinter)")
+    root.title(__app_name__)
     root.geometry("1200x800")
 
     style = ttk.Style()

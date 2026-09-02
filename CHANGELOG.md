@@ -1,5 +1,17 @@
 # Journal des versions
 
+## v1.0.9 — 2 septembre 2026
+
+- Configuration de la base par fenêtre : au premier lancement, l'application
+  demande hôte / port / base / utilisateur / mot de passe, avec un bouton
+  « Tester la connexion ». Plus de fichier à créer à la main.
+- Menu **Paramètres → Connexion à la base de données…** pour modifier ces
+  informations à tout moment (prises en compte sans redémarrer).
+- Config enregistrée dans `%APPDATA%\Facturation\db_config.ini` (Windows) ou
+  `~/.config/facturation/db_config.ini`.
+- Icône et nom de l'application aux couleurs Hytris ; le titre n'affiche plus
+  « (Tkinter) ».
+
 ## v1.0.8 — 2 septembre 2026
 
 - Dépôt passé en public : les identifiants de la base de données ne sont plus
