@@ -6,7 +6,7 @@ from tkinter import ttk, messagebox
 from core.settings import CURRENCY, PDF_FOLDER
 from core.db import money
 from core.version import __version__, __app_name__
-from core.updater import check_and_maybe_update
+from core.updater import check_and_maybe_update, start_auto_update
 
 from .tab_create import TabCreate
 from .tab_search import TabSearch
@@ -55,6 +55,9 @@ class App(ttk.Frame):
 
         self.tab_clients = TabClients(nb, controller=self)
         nb.add(self.tab_clients, text="Clients")
+
+        # Vérifie et installe automatiquement une nouvelle version (exe Windows uniquement)
+        start_auto_update(master)
 
     # -------- actions menu aide --------
     def check_updates(self):

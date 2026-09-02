@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
+import threading
 import urllib.request
 import urllib.error
 
@@ -176,3 +178,120 @@ def check_and_maybe_update(ask_user: bool = True):
     except Exception as e:
         if ask_user:
             _show_error("Mise à jour", f"Une erreur est survenue :\n{e}")
+
+
+# ==========================================================================
+#  Mise à jour AUTOMATIQUE au démarrage (packagé Windows uniquement)
+# ==========================================================================
+
+def _current_exe_path() -> str:
+    """Chemin de l'exe en cours d'exécution (PyInstaller onefile)."""
+    return sys.executable
+
+
+def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
+    """Écrit un .bat qui attend la fermeture de l'app (par PID), remplace
+    l'exe par la nouvelle version, relance, puis se supprime lui-même."""
+    bat = os.path.join(tempfile.gettempdir(), "facturation_update.bat")
+    content = (
+        "@echo off\r\n"
+        "setlocal\r\n"
+        f'set "PID={pid}"\r\n'
+        f'set "OLD={old_exe}"\r\n'
+        f'set "NEW={new_exe}"\r\n'
+        ":wait\r\n"
+        'tasklist /fi "PID eq %PID%" 2>nul | find "%PID%" >nul\r\n'
+        "if not errorlevel 1 (\r\n"
+        "    timeout /t 1 /nobreak >nul\r\n"
+        "    goto wait\r\n"
+        ")\r\n"
+        'move /y "%NEW%" "%OLD%" >nul 2>&1\r\n'
+        "if errorlevel 1 (\r\n"
+        "    timeout /t 2 /nobreak >nul\r\n"
+        '    move /y "%NEW%" "%OLD%" >nul 2>&1\r\n'
+        ")\r\n"
+        'start "" "%OLD%"\r\n'
+        'del "%~f0"\r\n'
+    )
+    with open(bat, "w", encoding="ascii", errors="replace") as f:
+        f.write(content)
+    return bat
+
+
+def _auto_update_worker(root):
+    """Exécuté dans un thread : vérifie + télécharge en arrière-plan, puis
+    revient sur le thread UI pour fermer/relancer l'application."""
+    try:
+        latest = _fetch_latest_release()
+        if not latest:
+            return
+        remote_tag = latest.get("tag_name") or latest.get("name") or ""
+        if not _is_newer(remote_tag, __version__):
+            return
+        picked = _pick_asset(latest)
+        if not picked:
+            return
+        _, asset_url = picked
+
+        old_exe = _current_exe_path()
+        new_exe = os.path.join(os.path.dirname(old_exe), "Facturation.update.exe")
+        _download(asset_url, new_exe)
+        if os.path.getsize(new_exe) < 1_000_000:
+            raise RuntimeError("fichier téléchargé invalide")
+    except Exception:
+        # Hors ligne, release inaccessible, dossier non inscriptible… :
+        # on ne dérange pas l'utilisateur, l'app continue normalement.
+        return
+
+    def _finish():
+        try:
+            _show_info(
+                "Mise à jour",
+                f"Mise à jour vers {remote_tag} téléchargée.\n"
+                "L'application va se fermer puis redémarrer automatiquement.",
+            )
+            bat = _write_swap_script(os.getpid(), old_exe, new_exe)
+            subprocess.Popen(
+                ["cmd", "/c", bat],
+                creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+                close_fds=True,
+            )
+            os._exit(0)
+        except Exception as e:
+            try:
+                if os.path.exists(new_exe):
+                    os.remove(new_exe)
+            except Exception:
+                pass
+            _show_error(
+                "Mise à jour",
+                f"La mise à jour automatique a échoué :\n{e}\n\n"
+                "L'application continue sur la version actuelle.",
+            )
+
+    try:
+        root.after(0, _finish)
+    except Exception:
+        pass
+
+
+def start_auto_update(root):
+    """À appeler une fois au démarrage.
+
+    Vérifie en arrière-plan qu'aucune release plus récente n'existe ; si oui,
+    télécharge le nouvel .exe, le met en place à la fermeture et redémarre.
+    N'agit qu'en mode packagé (`sys.frozen`) sous Windows ; sinon ne fait rien.
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    if not sys.platform.startswith("win"):
+        return
+    # Nettoie un éventuel téléchargement resté d'une tentative précédente échouée
+    try:
+        leftover = os.path.join(os.path.dirname(_current_exe_path()), "Facturation.update.exe")
+        if os.path.exists(leftover):
+            os.remove(leftover)
+    except Exception:
+        pass
+    threading.Thread(target=_auto_update_worker, args=(root,), daemon=True).start()
