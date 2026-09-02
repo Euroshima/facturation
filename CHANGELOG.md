@@ -1,5 +1,14 @@
 # Journal des versions
 
+## v1.0.7 — 2 septembre 2026
+
+- Mise à jour : le dépôt étant privé, l'updater utilise désormais un jeton
+  GitHub en lecture seule, lu depuis `update_token.txt` (à côté de l'exe) ou la
+  variable d'environnement `FACT_UPDATE_TOKEN`. Sans jeton : rien ne se passe au
+  démarrage, et le menu l'indique.
+- Téléchargement des assets via l'API GitHub (fonctionne sur dépôt privé).
+- Journal de diagnostic : `%TEMP%\facturation_update.log`.
+
 ## v1.0.6 — 2 septembre 2026
 
 - Barre d'état en bas : affiche la version en cours (permet de vérifier qu'une

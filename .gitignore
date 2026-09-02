@@ -41,6 +41,9 @@ $RECYCLE.BIN/
 /db.sqlite3
 *.db
 
+# --- Secret updater (jeton GitHub lecture seule, jamais versionné) ---
+update_token.txt
+
 # --- Tests ---
 .coverage
 htmlcov/

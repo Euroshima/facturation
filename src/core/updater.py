@@ -1,17 +1,27 @@
 # src/core/updater.py
 """
-Updater GitHub simple (stdlib only).
+Mise à jour depuis les releases GitHub (stdlib uniquement).
 
-- Vérifie la dernière release GitHub.
-- Compare au __version__ locale.
-- Si plus récent, propose à l'utilisateur de télécharger.
-- Télécharge l'asset .exe, le lance, puis ferme l'app (si packagée).
+- Vérifie la dernière release du dépôt.
+- Compare au __version__ local.
+- Si plus récente : télécharge le nouvel .exe, le met en place à la fermeture
+  de l'application (script .bat) puis redémarre.
+
+Le dépôt étant privé, l'API GitHub exige un jeton en lecture seule. Il est lu,
+dans l'ordre :
+  1. variable d'environnement FACT_UPDATE_TOKEN
+  2. fichier "update_token.txt" à côté de l'exe (ou du dossier courant en dev)
+Le jeton n'est PAS stocké dans le code.
+
+Journal : %TEMP%\\facturation_update.log
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,33 +30,90 @@ import urllib.request
 import urllib.error
 
 try:
-    # UI légère pour confirmations / erreurs
-    import tkinter as tk
     from tkinter import messagebox as mb
 except Exception:
-    tk = None
     mb = None
 
 from .version import __version__, __app_name__
 
-# ------------------ CONFIG À PERSONNALISER ------------------
+# ------------------ Configuration ------------------
 GITHUB_OWNER = "Euroshima"
 GITHUB_REPO = "facturation"
-# On prendra l'asset .exe de la release (premier qui correspond)
 ASSET_SUFFIX = ".exe"
-TIMEOUT = 15  # s pour les requêtes HTTP
-# ------------------------------------------------------------
+TIMEOUT = 20  # s pour les requêtes HTTP
+TOKEN_FILENAME = "update_token.txt"
+TOKEN_ENV = "FACT_UPDATE_TOKEN"
+# --------------------------------------------------
+
+LOG_PATH = os.path.join(tempfile.gettempdir(), "facturation_update.log")
+
+_log = logging.getLogger("facturation.updater")
+if not _log.handlers:
+    _log.setLevel(logging.INFO)
+    try:
+        _h = logging.FileHandler(LOG_PATH, encoding="utf-8")
+        _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        _log.addHandler(_h)
+    except Exception:
+        _log.addHandler(logging.NullHandler())
+
+
+# ==========================================================================
+#  Petites briques
+# ==========================================================================
+
+def _current_exe_path() -> str:
+    """Chemin de l'exe en cours d'exécution (PyInstaller onefile)."""
+    return sys.executable
+
+
+def _staged_exe_path() -> str:
+    """Emplacement du téléchargement, à côté de l'exe courant."""
+    return os.path.join(os.path.dirname(_current_exe_path()), "Facturation.update.exe")
+
+
+def _read_token() -> str:
+    """Jeton GitHub en lecture seule : env var puis fichier à côté de l'exe."""
+    tok = (os.environ.get(TOKEN_ENV) or "").strip()
+    if tok:
+        return tok
+    seen = set()
+    for d in (os.path.dirname(_current_exe_path()), os.getcwd()):
+        if not d or d in seen:
+            continue
+        seen.add(d)
+        try:
+            p = os.path.join(d, TOKEN_FILENAME)
+            if os.path.isfile(p):
+                with open(p, "r", encoding="utf-8-sig") as f:
+                    t = f.read().strip()
+                if t:
+                    return t
+        except Exception:
+            pass
+    return ""
+
+
+def _auth_headers(accept: str) -> dict:
+    h = {
+        "User-Agent": f"{__app_name__}-updater",
+        "Accept": accept,
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    tok = _read_token()
+    if tok:
+        h["Authorization"] = f"Bearer {tok}"
+    return h
 
 
 def _version_tuple(v: str) -> tuple:
-    """Transforme 'v1.2.3' ou '1.2.3' -> (1,2,3) pour comparaison robuste."""
+    """'v1.2.3' ou '1.2.3' -> (1, 2, 3) pour comparaison robuste."""
     v = (v or "").strip().lstrip("vV")
     parts = []
     for p in v.split("."):
         try:
             parts.append(int(p))
         except Exception:
-            # ignore morceaux non numériques (ex: rc1)
             break
     return tuple(parts or [0])
 
@@ -55,30 +122,32 @@ def _is_newer(remote: str, local: str) -> bool:
     return _version_tuple(remote) > _version_tuple(local)
 
 
-def _fetch_latest_release() -> dict | None:
+def _fetch_latest_release() -> dict:
     url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
-    req = urllib.request.Request(url, headers={"User-Agent": f"{__app_name__}-updater"})
+    req = urllib.request.Request(url, headers=_auth_headers("application/vnd.github+json"))
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-        if resp.status != 200:
-            return None
-        data = resp.read()
-        return json.loads(data.decode("utf-8"))
+        return json.loads(resp.read().decode("utf-8"))
 
 
-def _pick_asset(latest: dict) -> tuple[str, str] | None:
-    """Retourne (name, download_url) de l'asset .exe à télécharger."""
-    assets = latest.get("assets") or []
-    for a in assets:
+def _pick_asset(latest: dict):
+    """Retourne (nom, url_api_asset) du premier asset .exe, ou None.
+
+    On utilise l'URL API de l'asset (`url`) + Accept octet-stream : ça
+    fonctionne aussi bien pour un dépôt public que privé.
+    """
+    for a in latest.get("assets") or []:
         name = a.get("name") or ""
-        dl = a.get("browser_download_url") or ""
-        if name.endswith(ASSET_SUFFIX) and dl:
-            return name, dl
+        api_url = a.get("url") or ""
+        if name.endswith(ASSET_SUFFIX) and api_url:
+            return name, api_url
     return None
 
 
 def _download(url: str, dest: str):
-    # simple download (bloquant) ; on pourrait ajouter une barre de progression plus tard
-    urllib.request.urlretrieve(url, dest)
+    """Téléchargement authentifié vers `dest`."""
+    req = urllib.request.Request(url, headers=_auth_headers("application/octet-stream"))
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp, open(dest, "wb") as f:
+        shutil.copyfileobj(resp, f)
 
 
 def _show_info(title: str, msg: str):
@@ -98,27 +167,12 @@ def _show_error(title: str, msg: str):
 def _ask_yesno(title: str, msg: str) -> bool:
     if mb:
         return mb.askyesno(title, msg)
-    # fallback console
-    print(f"{title}: {msg} [y/N] ", end="")
-    try:
-        return input().strip().lower().startswith("y")
-    except Exception:
-        return False
+    return False
 
 
 # ==========================================================================
-#  Mécanisme de remplacement de l'exe (partagé auto / manuel)
+#  Remplacement de l'exe (partagé auto / manuel)
 # ==========================================================================
-
-def _current_exe_path() -> str:
-    """Chemin de l'exe en cours d'exécution (PyInstaller onefile)."""
-    return sys.executable
-
-
-def _staged_exe_path() -> str:
-    """Emplacement du téléchargement, à côté de l'exe courant."""
-    return os.path.join(os.path.dirname(_current_exe_path()), "Facturation.update.exe")
-
 
 def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
     """Écrit un .bat qui attend la fermeture de l'app (par PID), remplace
@@ -154,14 +208,16 @@ def _stage_new_exe(asset_url: str) -> str:
     Lève une exception si le téléchargement échoue ou paraît invalide."""
     new_exe = _staged_exe_path()
     _download(asset_url, new_exe)
-    if os.path.getsize(new_exe) < 1_000_000:
-        raise RuntimeError("fichier téléchargé invalide")
+    size = os.path.getsize(new_exe)
+    _log.info("téléchargé %d octets -> %s", size, new_exe)
+    if size < 1_000_000:
+        raise RuntimeError("fichier téléchargé invalide (trop petit)")
     return new_exe
 
 
 def _swap_and_restart(remote_tag: str, new_exe: str):
-    """À exécuter sur le thread UI : prévient, lance le script de remplacement
-    puis coupe le process. En cas d'échec, nettoie et prévient l'utilisateur."""
+    """Sur le thread UI : prévient, lance le script de remplacement, coupe le
+    process. En cas d'échec : nettoie et prévient l'utilisateur."""
     try:
         old_exe = _current_exe_path()
         _show_info(
@@ -169,8 +225,8 @@ def _swap_and_restart(remote_tag: str, new_exe: str):
             f"Mise à jour vers {remote_tag} téléchargée.\n"
             "L'application va se fermer puis redémarrer automatiquement.",
         )
-        _write_swap_script(os.getpid(), old_exe, new_exe)
-        bat = os.path.join(tempfile.gettempdir(), "facturation_update.bat")
+        bat = _write_swap_script(os.getpid(), old_exe, new_exe)
+        _log.info("lancement du script de bascule %s", bat)
         subprocess.Popen(
             ["cmd", "/c", bat],
             creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
@@ -179,6 +235,7 @@ def _swap_and_restart(remote_tag: str, new_exe: str):
         )
         os._exit(0)
     except Exception as e:
+        _log.exception("échec de la bascule")
         try:
             if os.path.exists(new_exe):
                 os.remove(new_exe)
@@ -196,8 +253,7 @@ def _swap_and_restart(remote_tag: str, new_exe: str):
 # ==========================================================================
 
 def check_and_maybe_update(ask_user: bool = True):
-    """Vérifie la dernière release GitHub et, si plus récente, propose de
-    l'installer (téléchargement + remplacement de l'exe + redémarrage).
+    """Vérifie la dernière release et, si plus récente, propose de l'installer.
     Appelée depuis le thread UI."""
     if not getattr(sys, "frozen", False):
         if ask_user:
@@ -213,13 +269,23 @@ def check_and_maybe_update(ask_user: bool = True):
         return
 
     try:
-        latest = _fetch_latest_release()
-        if not latest:
+        if not _read_token():
+            _log.warning("aucun jeton (%s ou %s)", TOKEN_ENV, TOKEN_FILENAME)
             if ask_user:
-                _show_error("Mise à jour", "Impossible de récupérer la dernière version.")
+                _show_error(
+                    "Mise à jour",
+                    "Jeton d'accès introuvable.\n\n"
+                    f"Placez le fichier « {TOKEN_FILENAME} » à côté de l'application "
+                    "(ou définissez la variable d'environnement "
+                    f"{TOKEN_ENV}).",
+                )
             return
 
+        _log.info("vérification manuelle — version locale v%s", __version__)
+        latest = _fetch_latest_release()
         remote_tag = latest.get("tag_name") or latest.get("name") or ""
+        _log.info("release distante : %s", remote_tag)
+
         if not _is_newer(remote_tag, __version__):
             if ask_user:
                 _show_info("Mise à jour", f"Vous êtes à jour.\nVersion actuelle : v{__version__}")
@@ -227,6 +293,7 @@ def check_and_maybe_update(ask_user: bool = True):
 
         picked = _pick_asset(latest)
         if not picked:
+            _log.error("aucun asset %s dans la release", ASSET_SUFFIX)
             if ask_user:
                 _show_error("Mise à jour", "Aucun binaire (.exe) trouvé dans la dernière release.")
             return
@@ -243,7 +310,17 @@ def check_and_maybe_update(ask_user: bool = True):
         new_exe = _stage_new_exe(asset_url)
         _swap_and_restart(remote_tag, new_exe)
 
+    except urllib.error.HTTPError as e:
+        _log.exception("HTTP %s", e.code)
+        if ask_user:
+            hint = ""
+            if e.code in (401, 403):
+                hint = "\n\nLe jeton est invalide ou n'a pas l'accès en lecture au dépôt."
+            elif e.code == 404:
+                hint = "\n\nDépôt ou release introuvable (jeton sans accès ?)."
+            _show_error("Mise à jour", f"Erreur HTTP {e.code}.{hint}")
     except Exception as e:
+        _log.exception("échec vérification manuelle")
         if ask_user:
             _show_error("Mise à jour", f"Une erreur est survenue :\n{e}")
 
@@ -256,26 +333,31 @@ def _auto_update_worker(root):
     """Thread : vérifie + télécharge en arrière-plan, puis revient sur le
     thread UI pour fermer/relancer l'application."""
     try:
-        latest = _fetch_latest_release()
-        if not latest:
+        if not _read_token():
+            _log.info("auto-update ignorée : aucun jeton")
             return
+        _log.info("auto-update — version locale v%s", __version__)
+        latest = _fetch_latest_release()
         remote_tag = latest.get("tag_name") or latest.get("name") or ""
+        _log.info("release distante : %s", remote_tag)
         if not _is_newer(remote_tag, __version__):
+            _log.info("déjà à jour")
             return
         picked = _pick_asset(latest)
         if not picked:
+            _log.error("aucun asset %s", ASSET_SUFFIX)
             return
         _, asset_url = picked
         new_exe = _stage_new_exe(asset_url)
     except Exception:
-        # Hors ligne, release inaccessible, dossier non inscriptible… :
-        # on ne dérange pas l'utilisateur, l'app continue normalement.
+        _log.exception("auto-update : échec (silencieux pour l'utilisateur)")
         return
 
+    _log.info("nouvelle version prête, bascule programmée")
     try:
         root.after(0, lambda: _swap_and_restart(remote_tag, new_exe))
     except Exception:
-        pass
+        _log.exception("auto-update : impossible de programmer la bascule")
 
 
 def start_auto_update(root):
@@ -289,6 +371,7 @@ def start_auto_update(root):
         return
     if not sys.platform.startswith("win"):
         return
+    _log.info("=== démarrage %s v%s ===", __app_name__, __version__)
     # Nettoie un éventuel téléchargement resté d'une tentative précédente échouée
     try:
         leftover = _staged_exe_path()
