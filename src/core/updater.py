@@ -2,10 +2,19 @@
 """
 Mise à jour depuis les releases GitHub (stdlib uniquement).
 
-- Vérifie la dernière release du dépôt (public).
-- Compare au __version__ local.
-- Si plus récente : télécharge le nouvel .exe, le met en place à la fermeture
-  de l'application (script .bat) puis redémarre.
+L'application est distribuée en **dossier** (PyInstaller `--onedir`) : la
+release contient une archive `Facturation-<version>.zip` qui renferme le
+dossier `Facturation/`. La mise à jour remplace donc tout le dossier, pas un
+simple fichier .exe.
+
+Déroulé :
+  1. On interroge la dernière release du dépôt (public) et on compare au
+     `__version__` local.
+  2. On télécharge le .zip dans %TEMP% et on l'extrait dans un dossier voisin
+     `Facturation.new` (à côté du dossier de l'application).
+  3. Un script .bat attend la fermeture de l'application (par PID), supprime
+     l'ancien dossier, met `Facturation.new` à sa place, relance l'exe puis se
+     supprime lui-même.
 
 Aucun jeton requis. Un jeton optionnel peut être fourni via FACT_UPDATE_TOKEN
 ou "update_token.txt" à côté de l'exe (utile seulement pour contourner la
@@ -26,6 +35,7 @@ import tempfile
 import threading
 import urllib.request
 import urllib.error
+import zipfile
 
 try:
     from tkinter import messagebox as mb
@@ -37,8 +47,13 @@ from .version import __version__, __app_name__
 # ------------------ Configuration ------------------
 GITHUB_OWNER = "Euroshima"
 GITHUB_REPO = "facturation"
-ASSET_SUFFIX = ".exe"
+ASSET_SUFFIX = ".zip"
+APP_DIR_NAME = "Facturation"
+APP_EXE_NAME = "Facturation.exe"
+STAGED_DIR_NAME = "Facturation.new"
+RELEASES_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 TIMEOUT = 20  # s pour les requêtes HTTP
+MIN_PACKAGE_SIZE = 1_000_000  # octets ; en dessous, l'archive est suspecte
 TOKEN_FILENAME = "update_token.txt"
 TOKEN_ENV = "FACT_UPDATE_TOKEN"
 # --------------------------------------------------
@@ -61,13 +76,33 @@ if not _log.handlers:
 # ==========================================================================
 
 def _current_exe_path() -> str:
-    """Chemin de l'exe en cours d'exécution (PyInstaller onefile)."""
+    """Chemin de l'exe en cours d'exécution."""
     return sys.executable
 
 
-def _staged_exe_path() -> str:
-    """Emplacement du téléchargement, à côté de l'exe courant."""
-    return os.path.join(os.path.dirname(_current_exe_path()), "Facturation.update.exe")
+def _app_dir() -> str:
+    """Dossier de l'application (`.../Facturation` en mode --onedir)."""
+    return os.path.dirname(os.path.abspath(_current_exe_path()))
+
+
+def _parent_dir() -> str:
+    """Dossier parent : c'est là qu'on prépare la nouvelle version."""
+    return os.path.dirname(_app_dir())
+
+
+def _staged_dir() -> str:
+    """Dossier temporaire voisin contenant la nouvelle version extraite."""
+    return os.path.join(_parent_dir(), STAGED_DIR_NAME)
+
+
+def _cleanup_staged():
+    """Supprime le dossier de préparation et son éventuel reliquat .tmp."""
+    for path in (_staged_dir(), _staged_dir() + ".tmp"):
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def _read_token() -> str:
@@ -76,7 +111,7 @@ def _read_token() -> str:
     if tok:
         return tok
     seen = set()
-    for d in (os.path.dirname(_current_exe_path()), os.getcwd()):
+    for d in (_app_dir(), os.getcwd()):
         if not d or d in seen:
             continue
         seen.add(d)
@@ -128,7 +163,7 @@ def _fetch_latest_release() -> dict:
 
 
 def _pick_asset(latest: dict):
-    """Retourne (nom, url_api_asset) du premier asset .exe, ou None.
+    """Retourne (nom, url_api_asset) du premier asset .zip, ou None.
 
     On utilise l'URL API de l'asset (`url`) + Accept octet-stream : ça
     fonctionne aussi bien pour un dépôt public que privé.
@@ -148,52 +183,165 @@ def _download(url: str, dest: str):
         shutil.copyfileobj(resp, f)
 
 
+def _console(prefix: str, title: str, msg: str):
+    """Sortie console tolérante : avec `--noconsole`, sys.stdout vaut None."""
+    try:
+        out = getattr(sys, "stdout", None)
+        if out is not None:
+            out.write(f"{prefix} {title}: {msg}\n")
+    except Exception:
+        pass
+
+
 def _show_info(title: str, msg: str):
     if mb:
-        mb.showinfo(title, msg)
-    else:
-        print(f"[INFO] {title}: {msg}")
+        try:
+            mb.showinfo(title, msg)
+            return
+        except Exception:
+            pass
+    _console("[INFO]", title, msg)
 
 
 def _show_error(title: str, msg: str):
     if mb:
-        mb.showerror(title, msg)
-    else:
-        print(f"[ERREUR] {title}: {msg}")
+        try:
+            mb.showerror(title, msg)
+            return
+        except Exception:
+            pass
+    _console("[ERREUR]", title, msg)
 
 
 def _ask_yesno(title: str, msg: str) -> bool:
     if mb:
-        return mb.askyesno(title, msg)
+        try:
+            return bool(mb.askyesno(title, msg))
+        except Exception:
+            return False
     return False
 
 
+def _manual_download_hint() -> str:
+    return (
+        "Vous pouvez télécharger la dernière archive .zip manuellement :\n"
+        f"{RELEASES_URL}\n\n"
+        "Décompressez-la puis remplacez le dossier « Facturation »."
+    )
+
+
 # ==========================================================================
-#  Remplacement de l'exe (partagé auto / manuel)
+#  Préparation de la nouvelle version (dossier)
 # ==========================================================================
 
-def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
-    """Écrit un .bat qui attend la fermeture de l'app (par PID), remplace
-    l'exe par la nouvelle version, relance, puis se supprime lui-même."""
+def _tree_size(path: str) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except Exception:
+                pass
+    return total
+
+
+def _find_app_root(extract_dir: str):
+    """Trouve, dans l'archive extraite, le dossier contenant Facturation.exe."""
+    if os.path.isfile(os.path.join(extract_dir, APP_EXE_NAME)):
+        return extract_dir
+    try:
+        entries = [
+            os.path.join(extract_dir, e)
+            for e in os.listdir(extract_dir)
+            if os.path.isdir(os.path.join(extract_dir, e))
+        ]
+    except Exception:
+        return None
+    for d in entries:
+        if os.path.isfile(os.path.join(d, APP_EXE_NAME)):
+            return d
+    return None
+
+
+def _stage_new_version(asset_url: str) -> str:
+    """Télécharge le .zip dans %TEMP%, l'extrait dans `Facturation.new` à côté
+    du dossier de l'application et vérifie sa cohérence.
+
+    Retourne le chemin du dossier prêt à être mis en place.
+    Lève une exception en cas de problème.
+    """
+    staged = _staged_dir()
+    tmp_extract = staged + ".tmp"
+    zip_path = os.path.join(tempfile.gettempdir(), "facturation_update.zip")
+
+    _cleanup_staged()
+    try:
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+    except Exception:
+        pass
+
+    _log.info("téléchargement de l'archive -> %s", zip_path)
+    _download(asset_url, zip_path)
+    size = os.path.getsize(zip_path)
+    _log.info("archive téléchargée : %d octets", size)
+    if size < MIN_PACKAGE_SIZE:
+        raise RuntimeError("archive téléchargée invalide (trop petite)")
+
+    os.makedirs(tmp_extract, exist_ok=True)
+    _log.info("extraction dans %s", tmp_extract)
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(tmp_extract)
+
+    root = _find_app_root(tmp_extract)
+    if not root:
+        raise RuntimeError(f"{APP_EXE_NAME} introuvable dans l'archive")
+
+    # Normalisation : <parent>/Facturation.new/Facturation.exe doit exister.
+    os.replace(root, staged)
+    shutil.rmtree(tmp_extract, ignore_errors=True)
+    try:
+        os.remove(zip_path)
+    except Exception:
+        pass
+
+    exe = os.path.join(staged, APP_EXE_NAME)
+    if not os.path.isfile(exe):
+        raise RuntimeError(f"{APP_EXE_NAME} manquant après extraction")
+    total = _tree_size(staged)
+    _log.info("version préparée dans %s (%d octets)", staged, total)
+    if total < MIN_PACKAGE_SIZE:
+        raise RuntimeError("contenu extrait invalide (trop petit)")
+    return staged
+
+
+def _write_swap_script(pid: int, app_dir: str, new_dir: str) -> str:
+    """Écrit un .bat qui attend la fermeture de l'app (par PID), remplace le
+    dossier de l'application par la nouvelle version, relance, puis se
+    supprime lui-même."""
     bat = os.path.join(tempfile.gettempdir(), "facturation_update.bat")
     content = (
         "@echo off\r\n"
         "setlocal\r\n"
         f'set "PID={pid}"\r\n'
-        f'set "OLD={old_exe}"\r\n'
-        f'set "NEW={new_exe}"\r\n'
+        f'set "APP={app_dir}"\r\n'
+        f'set "NEW={new_dir}"\r\n'
+        f'set "EXE={os.path.join(app_dir, APP_EXE_NAME)}"\r\n'
         ":wait\r\n"
         'tasklist /fi "PID eq %PID%" 2>nul | find "%PID%" >nul\r\n'
         "if not errorlevel 1 (\r\n"
         "    timeout /t 1 /nobreak >nul\r\n"
         "    goto wait\r\n"
         ")\r\n"
-        'move /y "%NEW%" "%OLD%" >nul 2>&1\r\n'
-        "if errorlevel 1 (\r\n"
-        "    timeout /t 2 /nobreak >nul\r\n"
-        '    move /y "%NEW%" "%OLD%" >nul 2>&1\r\n'
+        "timeout /t 1 /nobreak >nul\r\n"
+        'rmdir /s /q "%APP%" >nul 2>&1\r\n'
+        'move "%NEW%" "%APP%" >nul 2>&1\r\n'
+        'if not exist "%EXE%" (\r\n'
+        "    timeout /t 3 /nobreak >nul\r\n"
+        '    rmdir /s /q "%APP%" >nul 2>&1\r\n'
+        '    move "%NEW%" "%APP%" >nul 2>&1\r\n'
         ")\r\n"
-        'start "" "%OLD%"\r\n'
+        'start "" "%EXE%"\r\n'
         'del "%~f0"\r\n'
     )
     with open(bat, "w", encoding="ascii", errors="replace") as f:
@@ -201,30 +349,18 @@ def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
     return bat
 
 
-def _stage_new_exe(asset_url: str) -> str:
-    """Télécharge le nouvel exe à côté de l'actuel. Retourne son chemin.
-    Lève une exception si le téléchargement échoue ou paraît invalide."""
-    new_exe = _staged_exe_path()
-    _download(asset_url, new_exe)
-    size = os.path.getsize(new_exe)
-    _log.info("téléchargé %d octets -> %s", size, new_exe)
-    if size < 1_000_000:
-        raise RuntimeError("fichier téléchargé invalide (trop petit)")
-    return new_exe
-
-
-def _swap_and_restart(remote_tag: str, new_exe: str):
+def _swap_and_restart(remote_tag: str, new_dir: str):
     """Sur le thread UI : prévient, lance le script de remplacement, coupe le
-    process. En cas d'échec : nettoie et prévient l'utilisateur."""
+    process. En cas d'échec : nettoie et prévient l'utilisateur (sans quitter)."""
     try:
-        old_exe = _current_exe_path()
+        app_dir = _app_dir()
         _show_info(
             "Mise à jour",
             f"Mise à jour vers {remote_tag} téléchargée.\n"
             "L'application va se fermer puis redémarrer automatiquement.",
         )
-        bat = _write_swap_script(os.getpid(), old_exe, new_exe)
-        _log.info("lancement du script de bascule %s", bat)
+        bat = _write_swap_script(os.getpid(), app_dir, new_dir)
+        _log.info("lancement du script de bascule %s (app=%s, new=%s)", bat, app_dir, new_dir)
         subprocess.Popen(
             ["cmd", "/c", bat],
             creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
@@ -234,15 +370,12 @@ def _swap_and_restart(remote_tag: str, new_exe: str):
         os._exit(0)
     except Exception as e:
         _log.exception("échec de la bascule")
-        try:
-            if os.path.exists(new_exe):
-                os.remove(new_exe)
-        except Exception:
-            pass
+        _cleanup_staged()
         _show_error(
             "Mise à jour",
             f"La mise à jour a échoué :\n{e}\n\n"
-            "L'application continue sur la version actuelle.",
+            "L'application continue sur la version actuelle.\n\n"
+            + _manual_download_hint(),
         )
 
 
@@ -257,7 +390,7 @@ def check_and_maybe_update(ask_user: bool = True):
         if ask_user:
             _show_info(
                 "Mise à jour",
-                "La mise à jour n'est disponible que dans la version installée (.exe).\n"
+                "La mise à jour n'est disponible que dans la version installée.\n"
                 f"Version actuelle : v{__version__}",
             )
         return
@@ -281,7 +414,11 @@ def check_and_maybe_update(ask_user: bool = True):
         if not picked:
             _log.error("aucun asset %s dans la release", ASSET_SUFFIX)
             if ask_user:
-                _show_error("Mise à jour", "Aucun binaire (.exe) trouvé dans la dernière release.")
+                _show_error(
+                    "Mise à jour",
+                    "Aucune archive (.zip) trouvée dans la dernière release.\n\n"
+                    + _manual_download_hint(),
+                )
             return
         _, asset_url = picked
 
@@ -293,8 +430,19 @@ def check_and_maybe_update(ask_user: bool = True):
         ):
             return
 
-        new_exe = _stage_new_exe(asset_url)
-        _swap_and_restart(remote_tag, new_exe)
+        try:
+            new_dir = _stage_new_version(asset_url)
+        except Exception as e:
+            _log.exception("échec de la préparation de la nouvelle version")
+            _cleanup_staged()
+            if ask_user:
+                _show_error(
+                    "Mise à jour",
+                    f"La mise à jour a échoué :\n{e}\n\n" + _manual_download_hint(),
+                )
+            return
+
+        _swap_and_restart(remote_tag, new_dir)
 
     except urllib.error.HTTPError as e:
         _log.exception("HTTP %s", e.code)
@@ -331,35 +479,33 @@ def _auto_update_worker(root):
             _log.error("aucun asset %s", ASSET_SUFFIX)
             return
         _, asset_url = picked
-        new_exe = _stage_new_exe(asset_url)
+        new_dir = _stage_new_version(asset_url)
     except Exception:
         _log.exception("auto-update : échec (silencieux pour l'utilisateur)")
+        _cleanup_staged()
         return
 
     _log.info("nouvelle version prête, bascule programmée")
     try:
-        root.after(0, lambda: _swap_and_restart(remote_tag, new_exe))
+        root.after(0, lambda: _swap_and_restart(remote_tag, new_dir))
     except Exception:
         _log.exception("auto-update : impossible de programmer la bascule")
+        _cleanup_staged()
 
 
 def start_auto_update(root):
     """À appeler une fois au démarrage.
 
     Vérifie en arrière-plan qu'aucune release plus récente n'existe ; si oui,
-    télécharge le nouvel .exe, le met en place à la fermeture et redémarre.
-    N'agit qu'en mode packagé (`sys.frozen`) sous Windows ; sinon ne fait rien.
+    télécharge l'archive .zip, remplace le dossier de l'application à la
+    fermeture et redémarre. N'agit qu'en mode packagé (`sys.frozen`) sous
+    Windows ; sinon ne fait rien.
     """
     if not getattr(sys, "frozen", False):
         return
     if not sys.platform.startswith("win"):
         return
     _log.info("=== démarrage %s v%s ===", __app_name__, __version__)
-    # Nettoie un éventuel téléchargement resté d'une tentative précédente échouée
-    try:
-        leftover = _staged_exe_path()
-        if os.path.exists(leftover):
-            os.remove(leftover)
-    except Exception:
-        pass
+    # Nettoie un éventuel dossier resté d'une tentative précédente échouée
+    _cleanup_staged()
     threading.Thread(target=_auto_update_worker, args=(root,), daemon=True).start()

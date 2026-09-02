@@ -1,11 +1,23 @@
 # core/db.py
 import re
+import sys
 import psycopg2
 import psycopg2.extras
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 from .dbconfig import database_url
+
+
+def _console(msg: str):
+    """Écrit sur la sortie standard si elle existe (elle vaut None avec
+    PyInstaller `--noconsole`, où un `print()` lèverait une exception)."""
+    try:
+        out = getattr(sys, "stdout", None)
+        if out is not None:
+            out.write(f"{msg}\n")
+    except Exception:
+        pass
 
 # ---------- Connexion ----------
 # Les identifiants ne sont plus dans le code : voir core/dbconfig.py
@@ -376,7 +388,8 @@ def get_invoice_with_items(invoice_id):
             c.execute("SELECT * FROM invoices WHERE id=%s", (invoice_id,))
             inv = c.fetchone()
             if not inv:
-                print(f"Aucune facture trouvée pour id={invoice_id}")
+                # Pas de print() : en mode --noconsole, sys.stdout vaut None.
+                _console(f"Aucune facture trouvée pour id={invoice_id}")
                 return None, None, []
 
             c.execute("SELECT * FROM clients WHERE id=%s", (inv["client_id"],))

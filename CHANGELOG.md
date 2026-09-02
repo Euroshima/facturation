@@ -1,5 +1,26 @@
 # Journal des versions
 
+## v1.1.0 — 2 septembre 2026
+
+- **Distribution en dossier** : l'application n'est plus un unique `.exe` mais
+  un dossier `Facturation` livré dans une archive `Facturation-<version>.zip`.
+  Ce format déclenche beaucoup moins de faux positifs antivirus / Windows
+  Defender que l'exécutable « tout-en-un ». Décompressez l'archive et lancez
+  `Facturation\Facturation.exe` (gardez le dossier entier).
+- **Journal d'erreur au démarrage** : si l'application ne démarre pas, un
+  rapport complet est écrit dans `facturation-error.log` (à côté de l'exe et
+  dans `%TEMP%`) et une fenêtre d'erreur l'indique. Fini le double-clic qui ne
+  fait rien du tout.
+- **Mise à jour automatique adaptée** : elle télécharge désormais l'archive
+  `.zip` et remplace le dossier complet de l'application, puis redémarre. En
+  cas d'échec, un message indique comment mettre à jour à la main.
+- **Ressource de version Windows** (éditeur Hytris, description, numéro de
+  version) intégrée au binaire, et compression UPX désactivée : deux mesures
+  supplémentaires contre les faux positifs antivirus.
+- Le pilote PostgreSQL (`psycopg2`) est maintenant embarqué en entier (module,
+  extension binaire et DLL `libpq`) : plus de démarrage impossible faute de
+  DLL manquante.
+
 ## v1.0.9 — 2 septembre 2026
 
 - Configuration de la base par fenêtre : au premier lancement, l'application

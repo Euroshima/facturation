@@ -1,4 +1,4 @@
-name: Release (Windows exe)
+name: Release (Windows app)
 
 on:
   push:
@@ -27,23 +27,97 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build exe with PyInstaller
-        run: pyinstaller --onefile --noconsole --paths=src --collect-submodules psycopg2 --add-data "CHANGELOG.md;." --add-data "assets;assets" --icon "assets/hytris.ico" main.py -n Facturation
-
       - name: Compute version from tag
         id: ver
         shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Rename artifact
+      # Ressource de version Windows : identité de l'éditeur dans le binaire.
+      # Réduit fortement les faux positifs antivirus.
+      - name: Generate version_info.txt
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          mkdir out
-          mv dist/Facturation.exe out/Facturation-${{ steps.ver.outputs.version }}.exe
+          python - <<'PY'
+          import os, re
+          raw = os.environ["VERSION"]
+          nums = [int(x) for x in re.findall(r"\d+", raw)][:4]
+          while len(nums) < 4:
+              nums.append(0)
+          tup = ", ".join(str(n) for n in nums)
+          dotted = ".".join(str(n) for n in nums)
+          tpl = """VSVersionInfo(
+            ffi=FixedFileInfo(
+              filevers=(%(tup)s),
+              prodvers=(%(tup)s),
+              mask=0x3f,
+              flags=0x0,
+              OS=0x40004,
+              fileType=0x1,
+              subtype=0x0,
+              date=(0, 0)
+            ),
+            kids=[
+              StringFileInfo([StringTable('040C04B0', [
+                StringStruct('CompanyName', 'Hytris'),
+                StringStruct('FileDescription', 'Hytris Facturation'),
+                StringStruct('FileVersion', '%(dotted)s'),
+                StringStruct('InternalName', 'Facturation'),
+                StringStruct('LegalCopyright', 'Copyright (c) 2026 Hytris. Tous droits reserves.'),
+                StringStruct('OriginalFilename', 'Facturation.exe'),
+                StringStruct('ProductName', 'Hytris Facturation'),
+                StringStruct('ProductVersion', '%(dotted)s')])]),
+              VarFileInfo([VarStruct('Translation', [0x040C, 1200])])
+            ]
+          )
+          """ % {"tup": tup, "dotted": dotted}
+          with open("version_info.txt", "w", encoding="utf-8") as f:
+              f.write(tpl)
+          print(tpl)
+          PY
 
-      - name: Upload exe to GitHub Release
+      # --onedir + --noupx + ressource de version : bien moins de faux positifs
+      # antivirus que --onefile. --collect-all psycopg2 embarque le module,
+      # l'extension binaire _psycopg et les DLL libpq/OpenSSL.
+      - name: Build app with PyInstaller
+        run: >
+          pyinstaller
+          --onedir
+          --noconsole
+          --noupx
+          --clean
+          --noconfirm
+          --paths=src
+          --collect-all psycopg2
+          --hidden-import psycopg2
+          --hidden-import psycopg2._psycopg
+          --hidden-import psycopg2.extras
+          --add-data "CHANGELOG.md;."
+          --add-data "assets;assets"
+          --icon "assets/hytris.ico"
+          --version-file version_info.txt
+          -n Facturation
+          main.py
+
+      - name: Verify build output
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/Facturation/Facturation.exe")) {
+            throw "dist/Facturation/Facturation.exe est introuvable"
+          }
+          Get-ChildItem -Recurse dist/Facturation | Where-Object { $_.Name -like "*psycopg*" -or $_.Name -like "libpq*" } | Select-Object FullName
+
+      - name: Rename artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Compress-Archive -Path dist/Facturation -DestinationPath out/Facturation-${{ steps.ver.outputs.version }}.zip -Force
+
+      - name: Upload archive to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: out/Facturation-${{ steps.ver.outputs.version }}.exe
+          files: out/Facturation-${{ steps.ver.outputs.version }}.zip
           tag_name: v${{ steps.ver.outputs.version }}
           name: "Facturation v${{ steps.ver.outputs.version }}"
         env:

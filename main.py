@@ -1,15 +1,142 @@
 # main.py (à la racine du projet)
+"""Point d'entrée de l'application Facturation.
+
+Tout le démarrage est encadré par un garde-fou : la moindre erreur (import
+manquant, DLL absente dans le paquet, etc.) est écrite dans
+`facturation-error.log` (à côté de l'exe **et** dans %TEMP%) et affichée dans
+une boîte de dialogue. Sans cela, en mode `--noconsole`, un double-clic sur
+l'exe ne produirait strictement rien de visible.
+"""
+
+import datetime
+import faulthandler
 import os
 import sys
-import tkinter as tk
-from tkinter import ttk, messagebox
+import traceback
+
+ERROR_LOG_NAME = "facturation-error.log"
+
+# Gardé en global : le fichier doit rester ouvert tant que faulthandler écrit.
+_FAULT_FILE = None
+
+
+# ---------- Sécurité --noconsole : sys.stdout / sys.stderr peuvent être None ----------
+def _ensure_std_streams():
+    """En mode `--noconsole`, `sys.stdout`/`sys.stderr` valent None et le
+    moindre `print()` lève une AttributeError. On branche /dev/null (NUL)."""
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name, None) is None:
+            try:
+                setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+            except Exception:
+                pass
+
+
+def _error_log_paths():
+    """Emplacements où écrire le rapport d'erreur (sans doublon)."""
+    paths = []
+
+    def _add(p):
+        if p and p not in paths:
+            paths.append(p)
+
+    try:
+        _add(os.path.join(os.path.dirname(os.path.abspath(sys.executable)), ERROR_LOG_NAME))
+    except Exception:
+        pass
+    try:
+        import tempfile
+        _add(os.path.join(tempfile.gettempdir(), ERROR_LOG_NAME))
+    except Exception:
+        pass
+    try:
+        _add(os.path.join(os.path.expanduser("~"), ERROR_LOG_NAME))
+    except Exception:
+        pass
+    return paths
+
+
+def _enable_faulthandler():
+    """Active faulthandler vers un fichier (les crashs natifs y atterrissent)."""
+    global _FAULT_FILE
+    try:
+        import tempfile
+        path = os.path.join(tempfile.gettempdir(), "facturation-faulthandler.log")
+        _FAULT_FILE = open(path, "a", encoding="utf-8")
+        faulthandler.enable(file=_FAULT_FILE, all_threads=True)
+    except Exception:
+        try:
+            faulthandler.enable()
+        except Exception:
+            pass
+
+
+def _startup_report(exc: BaseException) -> str:
+    """Texte complet du rapport d'erreur de démarrage."""
+    lines = [
+        "=" * 72,
+        f"Erreur au démarrage — {datetime.datetime.now():%Y-%m-%d %H:%M:%S}",
+        "=" * 72,
+        f"Python     : {sys.version}",
+        f"Exécutable : {getattr(sys, 'executable', '?')}",
+        f"Gelé (exe) : {getattr(sys, 'frozen', False)}",
+        f"_MEIPASS   : {getattr(sys, '_MEIPASS', '(aucun)')}",
+        f"Plateforme : {sys.platform}",
+        f"Répertoire : {os.getcwd()}",
+        "",
+        "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        "",
+        "sys.path :",
+    ]
+    lines += [f"  - {p}" for p in sys.path]
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _report_startup_failure(exc: BaseException):
+    """Écrit le rapport dans tous les emplacements possibles puis l'affiche."""
+    report = _startup_report(exc)
+    written = []
+    for path in _error_log_paths():
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(report)
+            written.append(path)
+        except Exception:
+            continue
+
+    # Dernier recours : la console si elle existe.
+    try:
+        sys.stderr.write(report)
+    except Exception:
+        pass
+
+    # Boîte de dialogue si tkinter est disponible.
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        where = "\n".join(written) if written else "(aucun journal n'a pu être écrit)"
+        messagebox.showerror(
+            "Hytris Facturation — erreur au démarrage",
+            "L'application n'a pas pu démarrer.\n\n"
+            f"{type(exc).__name__} : {exc}\n\n"
+            "Détails complets dans :\n"
+            f"{where}",
+        )
+        root.destroy()
+    except Exception:
+        pass
+
 
 # ---------- Bootstrapping du sys.path pour trouver src/core, src/ui, src/pdf ----------
 def _bootstrap_sys_path():
     """
     Rendez les imports `core.*`, `ui.*`, `pdf.*` robustes :
     - en dev: on ajoute <project_root>/src
-    - en .exe (PyInstaller onefile): on tente d'abord _MEIPASS, sinon le dossier de l'exécutable
+    - en .exe (PyInstaller): on tente d'abord _MEIPASS, sinon le dossier de l'exécutable
     """
     try:
         import core  # noqa: F401
@@ -31,23 +158,17 @@ def _bootstrap_sys_path():
         if p and os.path.isdir(p) and p not in sys.path:
             sys.path.insert(0, p)
 
-_bootstrap_sys_path()
 
-# ---------- Imports projet (après bootstrap) ----------
-from core.settings import MY_INFO, PDF_FOLDER
-from core.db import init_db, find_or_create_client, try_connect
-from core.dbconfig import database_url
-from ui.app import App
-from ui.db_config_dialog import show_db_config_dialog
-from ui.appicon import apply_icon
-from core.version import __version__, __app_name__
-
-
+# ---------- Application ----------
 def ensure_dirs():
+    from core.settings import PDF_FOLDER
     os.makedirs(PDF_FOLDER, exist_ok=True)
 
 
 def ensure_my_info_in_db():
+    from core.settings import MY_INFO
+    from core.db import find_or_create_client
+
     full_name = (MY_INFO.get("nom") or "").strip()
     parts = full_name.split()
     prenom = parts[0] if parts else ""
@@ -73,6 +194,8 @@ def _improve_windows_ui():
 def _db_reachable():
     """(ok, message)."""
     try:
+        from core.db import try_connect
+        from core.dbconfig import database_url
         return try_connect(database_url())
     except Exception as e:
         return False, str(e)
@@ -81,6 +204,10 @@ def _db_reachable():
 def _ensure_db_configured(root):
     """Tant que la BDD n'est pas joignable, propose la fenêtre de config.
     Retourne True si on peut continuer, False si l'utilisateur abandonne."""
+    from tkinter import messagebox
+    from ui.db_config_dialog import show_db_config_dialog
+    from core.version import __app_name__
+
     ok, _ = _db_reachable()
     while not ok:
         if not show_db_config_dialog(root, first_run=True):
@@ -95,6 +222,14 @@ def _ensure_db_configured(root):
 
 
 def main():
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+
+    from core.db import init_db
+    from ui.app import App
+    from ui.appicon import apply_icon
+    from core.version import __app_name__
+
     _improve_windows_ui()
     ensure_dirs()
 
@@ -134,5 +269,22 @@ def main():
     root.mainloop()
 
 
+def _guarded_start():
+    """Démarrage protégé : toute erreur devient un journal + une boîte d'alerte."""
+    try:
+        _ensure_std_streams()
+        _enable_faulthandler()
+        _bootstrap_sys_path()
+        main()
+    except SystemExit:
+        raise
+    except BaseException as exc:  # noqa: BLE001 — on veut vraiment tout attraper
+        try:
+            _report_startup_failure(exc)
+        except Exception:
+            pass
+        sys.exit(1)
+
+
 if __name__ == "__main__":
-    main()
+    _guarded_start()
