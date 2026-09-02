@@ -2,7 +2,7 @@
 import os
 import sys
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 
 # ---------- Bootstrapping du sys.path pour trouver src/core, src/ui, src/pdf ----------
 def _bootstrap_sys_path():
@@ -70,10 +70,23 @@ def _improve_windows_ui():
 def main():
     _improve_windows_ui()
     ensure_dirs()
-    init_db()
-    ensure_my_info_in_db()
 
     root = tk.Tk()
+    root.withdraw()
+
+    try:
+        init_db()
+        ensure_my_info_in_db()
+    except Exception as e:
+        messagebox.showerror(
+            f"{__app_name__} — base de données",
+            "Impossible de se connecter à la base de données.\n\n"
+            f"{e}",
+        )
+        root.destroy()
+        return
+
+    root.deiconify()
     root.title(f"{__app_name__} (Tkinter)")
     root.geometry("1200x800")
 

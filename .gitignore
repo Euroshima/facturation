@@ -41,7 +41,10 @@ $RECYCLE.BIN/
 /db.sqlite3
 *.db
 
-# --- Secret updater (jeton GitHub lecture seule, jamais versionné) ---
+# --- Config base de données locale (identifiants, jamais versionné) ---
+db_config.ini
+
+# --- Secret updater (jeton GitHub optionnel, jamais versionné) ---
 update_token.txt
 
 # --- Tests ---

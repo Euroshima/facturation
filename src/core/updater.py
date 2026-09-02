@@ -2,16 +2,14 @@
 """
 Mise à jour depuis les releases GitHub (stdlib uniquement).
 
-- Vérifie la dernière release du dépôt.
+- Vérifie la dernière release du dépôt (public).
 - Compare au __version__ local.
 - Si plus récente : télécharge le nouvel .exe, le met en place à la fermeture
   de l'application (script .bat) puis redémarre.
 
-Le dépôt étant privé, l'API GitHub exige un jeton en lecture seule. Il est lu,
-dans l'ordre :
-  1. variable d'environnement FACT_UPDATE_TOKEN
-  2. fichier "update_token.txt" à côté de l'exe (ou du dossier courant en dev)
-Le jeton n'est PAS stocké dans le code.
+Aucun jeton requis. Un jeton optionnel peut être fourni via FACT_UPDATE_TOKEN
+ou "update_token.txt" à côté de l'exe (utile seulement pour contourner la
+limite de débit anonyme de l'API GitHub).
 
 Journal : %TEMP%\\facturation_update.log
 """
@@ -269,18 +267,6 @@ def check_and_maybe_update(ask_user: bool = True):
         return
 
     try:
-        if not _read_token():
-            _log.warning("aucun jeton (%s ou %s)", TOKEN_ENV, TOKEN_FILENAME)
-            if ask_user:
-                _show_error(
-                    "Mise à jour",
-                    "Jeton d'accès introuvable.\n\n"
-                    f"Placez le fichier « {TOKEN_FILENAME} » à côté de l'application "
-                    "(ou définissez la variable d'environnement "
-                    f"{TOKEN_ENV}).",
-                )
-            return
-
         _log.info("vérification manuelle — version locale v%s", __version__)
         latest = _fetch_latest_release()
         remote_tag = latest.get("tag_name") or latest.get("name") or ""
@@ -315,9 +301,9 @@ def check_and_maybe_update(ask_user: bool = True):
         if ask_user:
             hint = ""
             if e.code in (401, 403):
-                hint = "\n\nLe jeton est invalide ou n'a pas l'accès en lecture au dépôt."
+                hint = "\n\nAccès refusé par l'API GitHub (limite de débit ?)."
             elif e.code == 404:
-                hint = "\n\nDépôt ou release introuvable (jeton sans accès ?)."
+                hint = "\n\nDépôt ou release introuvable."
             _show_error("Mise à jour", f"Erreur HTTP {e.code}.{hint}")
     except Exception as e:
         _log.exception("échec vérification manuelle")
@@ -333,9 +319,6 @@ def _auto_update_worker(root):
     """Thread : vérifie + télécharge en arrière-plan, puis revient sur le
     thread UI pour fermer/relancer l'application."""
     try:
-        if not _read_token():
-            _log.info("auto-update ignorée : aucun jeton")
-            return
         _log.info("auto-update — version locale v%s", __version__)
         latest = _fetch_latest_release()
         remote_tag = latest.get("tag_name") or latest.get("name") or ""

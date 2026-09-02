@@ -1,22 +1,26 @@
 # core/db.py
-import os
 import re
 import psycopg2
 import psycopg2.extras
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
-# ---------- Connexion ----------
-# ---------- Variables de connexion ----------
-DB_HOST = os.getenv("DB_HOST", "192.168.50.250")  # IP du Pi
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "facturation")
-DB_USER = os.getenv("DB_USER", "admin")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "admin")
+from .dbconfig import database_url
 
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# ---------- Connexion ----------
+# Les identifiants ne sont plus dans le code : voir core/dbconfig.py
+# (fichier db_config.ini ou variables d'environnement DB_*).
+try:
+    DATABASE_URL = database_url()
+    _CONFIG_ERROR = None
+except Exception as e:  # config absente/incomplète : erreur reportée à get_conn()
+    DATABASE_URL = None
+    _CONFIG_ERROR = e
+
 
 def get_conn():
+    if _CONFIG_ERROR is not None:
+        raise _CONFIG_ERROR
     return psycopg2.connect(DATABASE_URL)
 
 # ---------- Normalisation ----------

@@ -1,5 +1,15 @@
 # Journal des versions
 
+## v1.0.8 — 2 septembre 2026
+
+- Dépôt passé en public : les identifiants de la base de données ne sont plus
+  dans le code. Ils se lisent depuis `db_config.ini` (à côté de l'exe) ou les
+  variables d'environnement `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` /
+  `DB_PASSWORD`. Voir `db_config.ini.example`.
+- Message clair au démarrage si la configuration de la base est absente.
+- Mise à jour automatique : plus besoin de jeton, le dépôt étant public
+  (un jeton reste accepté en option pour la limite de débit de l'API).
+
 ## v1.0.7 — 2 septembre 2026
 
 - Mise à jour : le dépôt étant privé, l'updater utilise désormais un jeton
