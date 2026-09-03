@@ -1,5 +1,10 @@
 # Journal des versions
 
+## v1.3.0 — 3 septembre 2026
+
+- Version de test de la bascule d'exe corrigée en 1.2.9 (aucun changement de
+  code).
+
 ## v1.2.9 — 3 septembre 2026
 
 - **Correctif « Security validation failure » après mise à jour.** Le script
