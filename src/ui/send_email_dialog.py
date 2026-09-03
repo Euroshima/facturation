@@ -4,12 +4,13 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from core.mailer import smtp_is_configured, send_via_smtp, open_mailto
+from core.mailtemplate import load_template, render
 from core.settings import MY_INFO
 from .dialog_util import make_visible
 
 
 class SendEmailDialog(tk.Toplevel):
-    def __init__(self, parent, *, facture_num, to_addr, pdf_path):
+    def __init__(self, parent, *, facture_num, to_addr, pdf_path, context=None):
         super().__init__(parent)
         self.sent = False
         self._pdf = pdf_path
@@ -17,13 +18,12 @@ class SendEmailDialog(tk.Toplevel):
         self.resizable(False, False)
 
         societe = MY_INFO.get("nom_entreprise") or MY_INFO.get("nom") or ""
-        default_subject = f"Facture {facture_num}" + (f" — {societe}" if societe else "")
-        default_body = (
-            "Bonjour,\n\n"
-            f"Veuillez trouver ci-joint la facture {facture_num}.\n\n"
-            "Cordialement,\n"
-            f"{societe}"
-        )
+        ctx = {"facture": facture_num, "societe": societe, "client": "",
+               "total": "", "date": "", "echeance": ""}
+        ctx.update(context or {})
+        tpl_subject, tpl_body = load_template()
+        default_subject = render(tpl_subject, ctx)
+        default_body = render(tpl_body, ctx)
 
         frm = ttk.Frame(self, padding=12)
         frm.pack(fill="both", expand=True)
@@ -90,7 +90,8 @@ class SendEmailDialog(tk.Toplevel):
         open_mailto(to, subject, body + note)
 
 
-def show_send_email_dialog(parent, *, facture_num, to_addr, pdf_path) -> bool:
-    dlg = SendEmailDialog(parent, facture_num=facture_num, to_addr=to_addr, pdf_path=pdf_path)
+def show_send_email_dialog(parent, *, facture_num, to_addr, pdf_path, context=None) -> bool:
+    dlg = SendEmailDialog(parent, facture_num=facture_num, to_addr=to_addr,
+                          pdf_path=pdf_path, context=context)
     dlg.wait_window()
     return dlg.sent

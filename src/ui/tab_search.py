@@ -168,12 +168,39 @@ class TabSearch(ttk.Frame):
             return messagebox.showerror("E-mail", f"Impossible de préparer le PDF :\n{e}")
         if not pdf_path:
             return messagebox.showerror("E-mail", "Facture introuvable en base.")
+
+        ctx = self._email_context(inv, client)
         show_send_email_dialog(
             self.winfo_toplevel(),
             facture_num=inv.get("facture_num"),
             to_addr=(client or {}).get("email", ""),
             pdf_path=pdf_path,
+            context=ctx,
         )
+
+    @staticmethod
+    def _email_context(inv, client):
+        from datetime import timedelta
+        from core.settings import MY_INFO
+        from pdf.pdfgen import _fmt_money, _fmt_date, _parse_date
+
+        client = client or {}
+        cli_name = (client.get("nom_entreprise") or "").strip() or \
+            f"{(client.get('prenom') or '').strip()} {(client.get('nom') or '').strip()}".strip()
+        d = _parse_date(inv.get("date"))
+        try:
+            delai = int(MY_INFO.get("delai_paiement_jours", 30))
+        except (TypeError, ValueError):
+            delai = 30
+        echeance = _fmt_date((d + timedelta(days=delai)).isoformat()) if d else ""
+        return {
+            "facture": inv.get("facture_num", ""),
+            "societe": MY_INFO.get("nom_entreprise") or MY_INFO.get("nom") or "",
+            "client": cli_name,
+            "total": _fmt_money(inv.get("total")),
+            "date": _fmt_date(inv.get("date")),
+            "echeance": echeance,
+        }
 
     def _open_selected_pdf(self):
         sel = self.tree.selection()

@@ -15,6 +15,7 @@ from .tab_clients import TabClients
 from .db_config_dialog import show_db_config_dialog
 from .company_dialog import show_company_dialog
 from .smtp_dialog import show_smtp_dialog
+from .mail_template_dialog import show_mail_template_dialog
 
 
 class App(ttk.Frame):
@@ -44,6 +45,7 @@ class App(ttk.Frame):
         menu_param = tk.Menu(menubar, tearoff=0)
         menu_param.add_command(label="Mon entreprise…", command=self.edit_company)
         menu_param.add_command(label="E-mail (SMTP)…", command=self.edit_smtp)
+        menu_param.add_command(label="Modèle d'e-mail…", command=self.edit_mail_template)
         menu_param.add_separator()
         menu_param.add_command(label="Connexion à la base de données…", command=self.edit_db_config)
         menubar.add_cascade(label="Paramètres", menu=menu_param)
@@ -88,6 +90,9 @@ class App(ttk.Frame):
 
     def edit_smtp(self):
         show_smtp_dialog(self.winfo_toplevel())
+
+    def edit_mail_template(self):
+        show_mail_template_dialog(self.winfo_toplevel())
 
     def edit_db_config(self):
         if show_db_config_dialog(self.winfo_toplevel()):

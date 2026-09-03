@@ -1,5 +1,14 @@
 # Journal des versions
 
+## v1.2.2 — 3 septembre 2026
+
+- **Modèle d'e-mail personnalisable** : Paramètres → *Modèle d'e-mail…* pour
+  écrire une fois le sujet et le corps, réutilisés à chaque envoi. Champs
+  substituables : `{facture}`, `{societe}`, `{client}`, `{total}`, `{date}`,
+  `{echeance}` (un champ inconnu est laissé tel quel, jamais d'erreur). Le
+  texte reste modifiable au cas par cas avant l'envoi. Bouton
+  « Réinitialiser » pour revenir au modèle par défaut.
+
 ## v1.2.1 — 3 septembre 2026
 
 - **Correctif mise à jour manuelle** : le script de remplacement laissait
