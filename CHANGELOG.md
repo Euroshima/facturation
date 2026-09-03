@@ -1,5 +1,15 @@
 # Journal des versions
 
+## v1.2.1 — 3 septembre 2026
+
+- **Correctif mise à jour manuelle** : le script de remplacement laissait
+  `Facturation.update.exe` à côté sans remplacer l'ancien exe. Causes :
+  `timeout` ne fonctionne pas quand le script tourne sans console, et l'exe
+  reste verrouillé quelques secondes après la fermeture. Le script temporise
+  maintenant avec `ping`, réessaie (suppression puis renommage de l'ancien)
+  jusqu'à ~80 s, puis relance la bonne version. Trace dans
+  `%TEMP%\facturation_update_bat.log`.
+
 ## v1.2.0 — 3 septembre 2026
 
 - **Paramètres → Mon entreprise…** : nom, adresse, SIRET, TVA intracom, IBAN,

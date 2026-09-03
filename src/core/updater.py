@@ -173,30 +173,60 @@ def _ask_yesno(title: str, msg: str) -> bool:
 # ==========================================================================
 
 def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
-    """Écrit un .bat qui attend la fermeture de l'app (par PID), remplace
-    l'exe par la nouvelle version, relance, puis se supprime lui-même."""
+    """Écrit un .bat qui : attend la fin de l'app (par PID), attend que l'exe
+    soit déverrouillé, le remplace par la nouvelle version, relance, se supprime.
+
+    IMPORTANT : `timeout` ne fonctionne pas quand le .bat tourne sans console
+    (processus détaché) -> on temporise avec `ping`. Et le .exe reste verrouillé
+    quelques secondes après la fermeture (bootloader onefile / antivirus /
+    OneDrive) -> on réessaie en boucle.
+    """
     bat = os.path.join(tempfile.gettempdir(), "facturation_update.bat")
+    log = os.path.join(tempfile.gettempdir(), "facturation_update_bat.log")
     content = (
         "@echo off\r\n"
-        "setlocal\r\n"
+        "setlocal enabledelayedexpansion\r\n"
         f'set "PID={pid}"\r\n'
         f'set "OLD={old_exe}"\r\n'
         f'set "NEW={new_exe}"\r\n'
+        f'set "LOG={log}"\r\n'
+        'echo [%date% %time%] debut PID=%PID% > "%LOG%"\r\n'
+        # 1) attendre la fin du process applicatif
         ":wait\r\n"
         'tasklist /fi "PID eq %PID%" 2>nul | find "%PID%" >nul\r\n'
         "if not errorlevel 1 (\r\n"
-        "    timeout /t 1 /nobreak >nul\r\n"
+        "    ping -n 2 127.0.0.1 >nul\r\n"
         "    goto wait\r\n"
         ")\r\n"
-        'move /y "%NEW%" "%OLD%" >nul 2>&1\r\n'
-        "if errorlevel 1 (\r\n"
-        "    timeout /t 2 /nobreak >nul\r\n"
-        '    move /y "%NEW%" "%OLD%" >nul 2>&1\r\n'
+        'echo [%date% %time%] process termine >> "%LOG%"\r\n'
+        'del "%OLD%.old" >nul 2>&1\r\n'
+        # 2) libérer l'ancien exe : d'abord del, sinon le renommer de côté ;
+        #    on réessaie tant qu'il est verrouillé (jusqu'à ~80 s)
+        "set /a n=0\r\n"
+        ":swap\r\n"
+        'del "%OLD%" >nul 2>&1\r\n'
+        'if exist "%OLD%" move /y "%OLD%" "%OLD%.old" >nul 2>&1\r\n'
+        'if exist "%OLD%" (\r\n'
+        "    set /a n+=1\r\n"
+        "    if !n! lss 40 (\r\n"
+        "        ping -n 3 127.0.0.1 >nul\r\n"
+        "        goto swap\r\n"
+        "    )\r\n"
         ")\r\n"
-        'start "" "%OLD%"\r\n'
+        # 3) mettre la nouvelle version en place
+        'move /y "%NEW%" "%OLD%" >nul 2>&1\r\n'
+        'echo [%date% %time%] essais=!n! ancien_present=%errorlevel% >> "%LOG%"\r\n'
+        'del "%OLD%.old" >nul 2>&1\r\n'
+        # 4) relancer : si le remplacement a réussi, %NEW% n'existe plus -> on
+        #    lance %OLD% (= nouveau contenu). Sinon on lance %NEW% (nouveau,
+        #    mais nom .update.exe) pour au moins tourner sur la dernière version.
+        'if not exist "%NEW%" ( start "" "%OLD%" ) else ( start "" "%NEW%" )\r\n'
+        'echo [%date% %time%] relance faite >> "%LOG%"\r\n'
         'del "%~f0"\r\n'
     )
-    with open(bat, "w", encoding="ascii", errors="replace") as f:
+    # cmd.exe lit un .bat dans le codepage ANSI (cp1252 sur Windows FR) : on
+    # écrit dans cet encodage pour que les chemins accentués passent.
+    with open(bat, "w", encoding="cp1252", errors="replace", newline="") as f:
         f.write(content)
     return bat
 
