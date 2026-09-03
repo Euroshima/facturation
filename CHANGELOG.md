@@ -1,5 +1,22 @@
 # Journal des versions
 
+## v1.1.6 — 3 septembre 2026
+
+- **PDF amélioré** :
+  - Montants et dates au format français (`1 234,56 €`, `JJ/MM/AAAA`).
+  - Ligne **Date d'émission / Échéance** (échéance = date + 30 j, réglable via
+    `delai_paiement_jours`).
+  - **Mentions légales** ajoutées : conditions de règlement, pénalités de
+    retard + indemnité forfaitaire 40 € ; « TVA non applicable, art. 293 B du
+    CGI » automatiquement si la facture est sans TVA.
+  - Pied de page : **IBAN / BIC** (formatés) au lieu du RIB brut ;
+    numérotation **« Page X / Y »**.
+  - Tableau épuré (colonne « TVA % » par ligne retirée, en-tête foncé),
+    bloc totaux avec « Net à payer TTC » mis en avant.
+  - Nouvelles clés optionnelles dans `MY_INFO` : `iban`, `bic`,
+    `tva_intracom`, `delai_paiement_jours`, `mentions_legales`,
+    `pied_de_page`, `reference_client`.
+
 ## v1.1.5 — 3 septembre 2026
 
 - **Correctif (suite)** : la fenêtre de connexion à la base ne s'affichait
