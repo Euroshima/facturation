@@ -1,5 +1,13 @@
 # Journal des versions
 
+## v1.2.3 — 3 septembre 2026
+
+- Nettoyage : suppression de l'échafaudage de traçage du démarrage
+  (`_trace`, `core/debuglog.py`, `facturation-boot.log`). Le garde-fou reste :
+  toute erreur au démarrage est toujours écrite dans `facturation-error.log`
+  et affichée. `Facturation-debug-<version>.exe` (console) reste fourni pour
+  voir un éventuel plantage.
+
 ## v1.2.2 — 3 septembre 2026
 
 - **Modèle d'e-mail personnalisable** : Paramètres → *Modèle d'e-mail…* pour

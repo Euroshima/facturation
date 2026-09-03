@@ -4,11 +4,6 @@ from tkinter import ttk, messagebox
 
 from core.dbconfig import read_saved_config, save_db_config, build_url
 from core.db import try_connect
-from core.debuglog import trace as _dbg
-
-
-def _trace(msg):
-    _dbg(f"[dlg] {msg}")
 
 _FIELDS = [
     ("host", "Hôte / IP", False),
@@ -23,7 +18,6 @@ class DbConfigDialog(tk.Toplevel):
     """Modale : saisie/édition des identifiants de connexion PostgreSQL."""
 
     def __init__(self, parent, *, first_run=False):
-        _trace("DbConfigDialog.__init__")
         super().__init__(parent)
         self.saved = False
         self.title("Connexion à la base de données")
@@ -60,7 +54,6 @@ class DbConfigDialog(tk.Toplevel):
         self.bind("<Escape>", lambda e: self._cancel())
 
         # --- Affichage robuste (aucun appel bloquant : pas de wait_visibility) ---
-        _trace("dlg: widgets prêts")
         try:
             self.update_idletasks()
         except Exception:
@@ -80,7 +73,6 @@ class DbConfigDialog(tk.Toplevel):
         # grab_set en best-effort et différé : s'il échoue (fenêtre pas encore
         # mappée) on réessaie, mais on ne bloque jamais.
         self.after(50, self._try_grab)
-        _trace("dlg: __init__ terminé")
 
     def _try_grab(self, tries=0):
         try:
@@ -153,9 +145,6 @@ class DbConfigDialog(tk.Toplevel):
 
 def show_db_config_dialog(parent, first_run=False) -> bool:
     """Ouvre la modale. Retourne True si la config a été enregistrée."""
-    _trace("show_db_config_dialog: création")
     dlg = DbConfigDialog(parent, first_run=first_run)
-    _trace("show_db_config_dialog: wait_window")
     dlg.wait_window()
-    _trace(f"show_db_config_dialog: fermée (saved={dlg.saved})")
     return dlg.saved

@@ -20,23 +20,6 @@ ERROR_LOG_NAME = "facturation-error.log"
 _FAULT_FILE = None
 
 
-# ---------- Traçage du démarrage (désactivé par défaut, cf. core/debuglog) ----------
-def _trace(msg):
-    try:
-        from core.debuglog import trace
-        trace(msg)
-    except Exception:
-        pass
-
-
-def _reset_boot_log():
-    try:
-        from core.debuglog import reset
-        reset()
-    except Exception:
-        pass
-
-
 # ---------- Sécurité --noconsole : sys.stdout / sys.stderr peuvent être None ----------
 def _ensure_std_streams():
     """En mode `--noconsole`, `sys.stdout`/`sys.stderr` valent None et le
@@ -225,17 +208,11 @@ def _ensure_db_configured(root):
     from ui.db_config_dialog import show_db_config_dialog
     from core.version import __app_name__
 
-    _trace("_db_reachable()…")
     ok, msg = _db_reachable()
-    _trace(f"_db_reachable -> {ok}")
     while not ok:
-        _trace("affichage fenêtre config BDD")
         if not show_db_config_dialog(root, first_run=True):
-            _trace("config BDD annulée")
             return False
-        _trace("fenêtre config fermée, nouveau test")
         ok, err = _db_reachable()
-        _trace(f"_db_reachable -> {ok}")
         if not ok and not messagebox.askretrycancel(
             f"{__app_name__} — base de données",
             f"Connexion toujours impossible :\n{err}",
@@ -245,50 +222,34 @@ def _ensure_db_configured(root):
 
 
 def main():
-    _trace("main() début")
     import tkinter as tk
     from tkinter import ttk, messagebox
-    _trace("tkinter importé")
 
     from core.db import init_db
-    _trace("core.db importé")
     from ui.app import App
-    _trace("ui.app importé")
     from ui.appicon import apply_icon
     from core.version import __app_name__
-    _trace("imports projet OK")
 
     _improve_windows_ui()
     ensure_dirs()
-    _trace("ensure_dirs OK")
 
     root = tk.Tk()
-    _trace("tk.Tk() créé")
     root.title(__app_name__)
     root.geometry("1200x800")
     apply_icon(root)
-    _trace("apply_icon OK")
     root.withdraw()  # caché tant que l'appli n'est pas prête
 
     def _startup():
         """Séquence de démarrage exécutée DANS la boucle d'événements Tk :
         les fenêtres modales (config BDD…) ne fonctionnent de façon fiable
         qu'une fois mainloop() lancée."""
-        _trace("_startup (dans mainloop)")
         try:
-            _trace("_ensure_db_configured…")
             if not _ensure_db_configured(root):
-                _trace("db non configurée -> fermeture")
                 root.destroy()
                 return
-            _trace("db joignable")
-
             init_db()
-            _trace("init_db OK")
             ensure_my_info_in_db()
-            _trace("ensure_my_info_in_db OK")
         except Exception as e:
-            _trace(f"ERREUR startup: {type(e).__name__}: {e}")
             try:
                 messagebox.showerror(
                     f"{__app_name__} — base de données",
@@ -308,16 +269,12 @@ def main():
                 except Exception:
                     continue
 
-        _trace("construction App…")
         App(root)
-        _trace("App construite")
         root.deiconify()
         root.lift()
 
     root.after(0, _startup)
-    _trace("mainloop")
     root.mainloop()
-    _trace("mainloop terminé")
 
 
 def _console_pause():
@@ -336,17 +293,10 @@ def _guarded_start():
         _ensure_std_streams()
         _enable_faulthandler()
         _bootstrap_sys_path()
-        _reset_boot_log()
-        _trace("guarded_start — streams/faulthandler/path OK")
         main()
-        _trace("main() terminé normalement")
     except SystemExit:
         raise
     except BaseException as exc:  # noqa: BLE001 — on veut vraiment tout attraper
-        try:
-            _trace(f"ERREUR: {type(exc).__name__}: {exc}")
-        except Exception:
-            pass
         try:
             _report_startup_failure(exc)
         except Exception:
