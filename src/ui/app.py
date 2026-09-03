@@ -6,7 +6,7 @@ from tkinter import ttk, messagebox
 from core.settings import CURRENCY, PDF_FOLDER
 from core.db import money
 from core.version import __version__, __app_name__
-from core.updater import check_and_maybe_update
+from core.updater import check_and_maybe_update, check_for_update_async
 from core.changelog import load_changelog
 
 from .tab_create import TabCreate
@@ -63,6 +63,14 @@ class App(ttk.Frame):
         ttk.Label(
             statusbar, text=f"{__app_name__}  v{__version__}", anchor="w", padding=(6, 2)
         ).pack(side="left")
+        # Indicateur « mise à jour disponible » (bas à droite), masqué au départ
+        self._update_notified = False
+        self.lbl_update = tk.Label(
+            statusbar, text="", fg="#b63410", cursor="hand2",
+            font=("TkDefaultFont", 9, "bold"), padx=8,
+        )
+        self.lbl_update.pack(side="right")
+        self.lbl_update.bind("<Button-1>", lambda e: self.check_updates())
 
         # --- Notebook + onglets ---
         nb = ttk.Notebook(self)
@@ -77,9 +85,31 @@ class App(ttk.Frame):
         self.tab_clients = TabClients(nb, controller=self)
         nb.add(self.tab_clients, text="Clients")
 
-        # NB : plus de vérification automatique de mise à jour au démarrage
-        # (elle empêchait l'application de s'ouvrir). Mise à jour manuelle via
-        # le menu Aide → « Vérifier les mises à jour ».
+        # Vérification NON bloquante : on ne fait que *signaler* si une version
+        # plus récente existe (indicateur + petit pop-up). Le remplacement
+        # d'exe ne se déclenche que si l'utilisateur clique.
+        check_for_update_async(
+            lambda v: self.after(0, lambda: self._notify_update_available(v))
+        )
+
+    # -------- mise à jour : signalement --------
+    def _notify_update_available(self, version):
+        try:
+            self.lbl_update.config(text=f"⬆  Mise à jour v{version} disponible")
+        except Exception:
+            pass
+        if self._update_notified:
+            return
+        self._update_notified = True
+        if messagebox.askyesno(
+            "Mise à jour disponible",
+            f"La version {version} est disponible "
+            f"(vous utilisez la v{__version__}).\n\nL'installer maintenant ?",
+        ):
+            try:
+                check_and_maybe_update(ask_user=False, show_errors=True)
+            except Exception as e:
+                messagebox.showerror("Mise à jour", f"Échec :\n{e}")
 
     # -------- actions menu --------
     def edit_company(self):

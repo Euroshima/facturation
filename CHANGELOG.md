@@ -1,5 +1,15 @@
 # Journal des versions
 
+## v1.2.5 — 3 septembre 2026
+
+- **Signalement des mises à jour** (sans blocage) : au lancement, une
+  vérification en arrière-plan ; si une version plus récente existe :
+  - petit pop-up « La version X est disponible — l'installer maintenant ? » ;
+  - indicateur permanent « ⬆ Mise à jour vX disponible » en bas à droite,
+    cliquable pour lancer l'installation.
+  Rien ne se télécharge ni ne se remplace tant que l'utilisateur n'a pas
+  cliqué. Silencieux si hors ligne.
+
 ## v1.2.4 — 3 septembre 2026
 
 - Le fichier de la release s'appelle désormais simplement **`Facturation.exe`**

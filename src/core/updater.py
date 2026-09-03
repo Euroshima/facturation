@@ -290,9 +290,16 @@ def _swap_and_restart(remote_tag: str, new_exe: str):
 #  Vérification MANUELLE (menu Aide)
 # ==========================================================================
 
-def check_and_maybe_update(ask_user: bool = True):
+def check_and_maybe_update(ask_user: bool = True, show_errors=None):
     """Vérifie la dernière release et, si plus récente, propose de l'installer.
-    Appelée depuis le thread UI."""
+    Appelée depuis le thread UI.
+
+    ask_user   : afficher les infos (« à jour », confirmation avant install).
+    show_errors: afficher les erreurs (défaut = ask_user). Mettre True quand
+                 l'utilisateur a déjà confirmé ailleurs (pop-up de démarrage).
+    """
+    if show_errors is None:
+        show_errors = ask_user
     if not getattr(sys, "frozen", False):
         if ask_user:
             _show_info(
@@ -320,7 +327,7 @@ def check_and_maybe_update(ask_user: bool = True):
         picked = _pick_asset(latest)
         if not picked:
             _log.error("aucun asset %s dans la release", ASSET_SUFFIX)
-            if ask_user:
+            if show_errors:
                 _show_error("Mise à jour", "Aucun binaire (.exe) trouvé dans la dernière release.")
             return
         _, asset_url = picked
@@ -338,7 +345,7 @@ def check_and_maybe_update(ask_user: bool = True):
 
     except urllib.error.HTTPError as e:
         _log.exception("HTTP %s", e.code)
-        if ask_user:
+        if show_errors:
             hint = ""
             if e.code in (401, 403):
                 hint = "\n\nAccès refusé par l'API GitHub (limite de débit ?)."
@@ -347,59 +354,41 @@ def check_and_maybe_update(ask_user: bool = True):
             _show_error("Mise à jour", f"Erreur HTTP {e.code}.{hint}")
     except Exception as e:
         _log.exception("échec vérification manuelle")
-        if ask_user:
+        if show_errors:
             _show_error("Mise à jour", f"Une erreur est survenue :\n{e}")
 
 
 # ==========================================================================
-#  Mise à jour AUTOMATIQUE au démarrage (packagé Windows uniquement)
+#  Notification « nouvelle version disponible » (au démarrage, non bloquant)
 # ==========================================================================
 
-def _auto_update_worker(root):
-    """Thread : vérifie + télécharge en arrière-plan, puis revient sur le
-    thread UI pour fermer/relancer l'application."""
-    try:
-        _log.info("auto-update — version locale v%s", __version__)
-        latest = _fetch_latest_release()
-        remote_tag = latest.get("tag_name") or latest.get("name") or ""
-        _log.info("release distante : %s", remote_tag)
-        if not _is_newer(remote_tag, __version__):
-            _log.info("déjà à jour")
-            return
-        picked = _pick_asset(latest)
-        if not picked:
-            _log.error("aucun asset %s", ASSET_SUFFIX)
-            return
-        _, asset_url = picked
-        new_exe = _stage_new_exe(asset_url)
-    except Exception:
-        _log.exception("auto-update : échec (silencieux pour l'utilisateur)")
-        return
-
-    _log.info("nouvelle version prête, bascule programmée")
-    try:
-        root.after(0, lambda: _swap_and_restart(remote_tag, new_exe))
-    except Exception:
-        _log.exception("auto-update : impossible de programmer la bascule")
+def latest_version_available():
+    """Interroge la dernière release. Retourne la version distante (ex.
+    '1.2.5') si elle est plus récente que la version locale, sinon None.
+    Lève en cas d'erreur réseau (à l'appelant de l'ignorer)."""
+    latest = _fetch_latest_release()
+    tag = latest.get("tag_name") or latest.get("name") or ""
+    if _is_newer(tag, __version__):
+        return tag.lstrip("vV")
+    return None
 
 
-def start_auto_update(root):
-    """À appeler une fois au démarrage.
-
-    Vérifie en arrière-plan qu'aucune release plus récente n'existe ; si oui,
-    télécharge le nouvel .exe, le met en place à la fermeture et redémarre.
-    N'agit qu'en mode packagé (`sys.frozen`) sous Windows ; sinon ne fait rien.
+def check_for_update_async(on_available):
+    """Vérifie en arrière-plan (thread daemon) si une version plus récente
+    existe. Si oui, appelle `on_available(version)` — DEPUIS LE THREAD DE FOND :
+    l'appelant doit re-poster sur le thread UI (root.after). Silencieux sinon.
+    Ne fait rien hors mode packagé.
     """
     if not getattr(sys, "frozen", False):
         return
-    if not sys.platform.startswith("win"):
-        return
-    _log.info("=== démarrage %s v%s ===", __app_name__, __version__)
-    # Nettoie un éventuel téléchargement resté d'une tentative précédente échouée
-    try:
-        leftover = _staged_exe_path()
-        if os.path.exists(leftover):
-            os.remove(leftover)
-    except Exception:
-        pass
-    threading.Thread(target=_auto_update_worker, args=(root,), daemon=True).start()
+
+    def _work():
+        try:
+            v = latest_version_available()
+            if v:
+                _log.info("nouvelle version disponible : %s", v)
+                on_available(v)
+        except Exception:
+            _log.exception("check_for_update_async")
+
+    threading.Thread(target=_work, daemon=True).start()
