@@ -254,11 +254,17 @@ def _ensure_db_configured(root):
     from ui.db_config_dialog import show_db_config_dialog
     from core.version import __app_name__
 
-    ok, _ = _db_reachable()
+    _trace("_db_reachable()…")
+    ok, msg = _db_reachable()
+    _trace(f"_db_reachable -> {ok}")
     while not ok:
+        _trace("affichage fenêtre config BDD")
         if not show_db_config_dialog(root, first_run=True):
+            _trace("config BDD annulée")
             return False
+        _trace("fenêtre config fermée, nouveau test")
         ok, err = _db_reachable()
+        _trace(f"_db_reachable -> {ok}")
         if not ok and not messagebox.askretrycancel(
             f"{__app_name__} — base de données",
             f"Connexion toujours impossible :\n{err}",
@@ -287,7 +293,11 @@ def main():
 
     root = tk.Tk()
     _trace("tk.Tk() créé")
-    root.withdraw()
+    # NE PAS masquer le root ici : une fenêtre modale « transient » d'un root
+    # masqué devient invisible sous Windows tout en bloquant (freeze au
+    # démarrage). On donne tout de suite sa taille/titre au root.
+    root.title(__app_name__)
+    root.geometry("1200x800")
     apply_icon(root)
     _trace("apply_icon OK")
 

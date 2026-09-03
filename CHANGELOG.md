@@ -1,5 +1,13 @@
 # Journal des versions
 
+## v1.1.4 — 3 septembre 2026
+
+- **Correctif : l'application ne s'ouvrait plus.** Le blocage venait de la
+  fenêtre de connexion à la base : elle était « transient » de la fenêtre
+  principale masquée, ce qui la rendait invisible sous Windows tout en gelant
+  l'application. La fenêtre s'affiche désormais toujours, au premier plan.
+- Trace de démarrage complétée jusqu'à l'affichage de cette fenêtre.
+
 ## v1.1.3 — 3 septembre 2026
 
 - **Correctif démarrage** : la vérification automatique de mise à jour au

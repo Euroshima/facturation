@@ -22,7 +22,6 @@ class DbConfigDialog(tk.Toplevel):
         self.saved = False
         self.title("Connexion à la base de données")
         self.resizable(False, False)
-        self.transient(parent)
 
         current = read_saved_config()
         self._vars = {}
@@ -54,11 +53,40 @@ class DbConfigDialog(tk.Toplevel):
         self.bind("<Return>", lambda e: self._save())
         self.bind("<Escape>", lambda e: self._cancel())
 
-        self.grab_set()
+        # --- Rendre la fenêtre RÉELLEMENT visible ---
+        # On ne met PAS `transient(parent)` si le parent est masqué : sous
+        # Windows la fenêtre deviendrait invisible tout en bloquant.
         self.update_idletasks()
-        self._center_on(parent)
+        self._center_on_screen()
+        self.deiconify()
+        self.lift()
+        try:
+            if parent is not None and parent.winfo_viewable():
+                self.transient(parent)
+        except Exception:
+            pass
+        try:
+            self.attributes("-topmost", True)
+            self.after(400, self._drop_topmost)
+        except Exception:
+            pass
+        try:
+            self.focus_force()
+        except Exception:
+            pass
+        try:
+            self.wait_visibility()
+            self.grab_set()
+        except Exception:
+            pass
 
     # ---- helpers ----
+    def _drop_topmost(self):
+        try:
+            self.attributes("-topmost", False)
+        except Exception:
+            pass
+
     def _values(self):
         return {k: v.get().strip() for k, v in self._vars.items()}
 
@@ -66,12 +94,12 @@ class DbConfigDialog(tk.Toplevel):
         return [lbl for key, lbl, _ in _FIELDS
                 if key in ("host", "user", "password") and not vals.get(key)]
 
-    def _center_on(self, parent):
+    def _center_on_screen(self):
         try:
-            px, py = parent.winfo_rootx(), parent.winfo_rooty()
-            pw, ph = parent.winfo_width(), parent.winfo_height()
-            w, h = self.winfo_width(), self.winfo_height()
-            self.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 3}")
+            w = self.winfo_reqwidth() or 380
+            h = self.winfo_reqheight() or 260
+            sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+            self.geometry(f"+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 3)}")
         except Exception:
             pass
 
