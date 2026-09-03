@@ -1,5 +1,10 @@
 # Journal des versions
 
+## v1.2.8 — 3 septembre 2026
+
+- Version de test de la mise à jour automatique (aucun changement de code par
+  rapport à la 1.2.7).
+
 ## v1.2.7 — 3 septembre 2026
 
 - **Mise à jour : remplacement de l'exe plus robuste.**
