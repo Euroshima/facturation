@@ -1,5 +1,14 @@
 # Journal des versions
 
+## v1.1.5 — 3 septembre 2026
+
+- **Correctif (suite)** : la fenêtre de connexion à la base ne s'affichait
+  toujours pas. Toute la séquence de démarrage (test BDD, fenêtre de config,
+  init) s'exécute désormais **dans** la boucle d'événements Tk, seul contexte
+  où les fenêtres modales fonctionnent de façon fiable. `grab_set` non
+  bloquant, plus de `wait_visibility`.
+- Traces de démarrage jusqu'à l'intérieur de la fenêtre de config.
+
 ## v1.1.4 — 3 septembre 2026
 
 - **Correctif : l'application ne s'ouvrait plus.** Le blocage venait de la

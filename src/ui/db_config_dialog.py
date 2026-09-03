@@ -1,9 +1,25 @@
 # src/ui/db_config_dialog.py — fenêtre de configuration de la connexion BDD
+import datetime
+import os
+import sys
+import tempfile
 import tkinter as tk
 from tkinter import ttk, messagebox
 
 from core.dbconfig import read_saved_config, save_db_config, build_url
 from core.db import try_connect
+
+
+def _trace(msg):
+    """Trace dans facturation-boot.log (même fichier que main.py)."""
+    line = f"{datetime.datetime.now():%H:%M:%S.%f} | [dlg] {msg}\n"
+    for base in (os.path.dirname(os.path.abspath(sys.executable)), tempfile.gettempdir()):
+        try:
+            with open(os.path.join(base, "facturation-boot.log"), "a", encoding="utf-8") as f:
+                f.write(line)
+                f.flush()
+        except Exception:
+            pass
 
 _FIELDS = [
     ("host", "Hôte / IP", False),
@@ -18,6 +34,7 @@ class DbConfigDialog(tk.Toplevel):
     """Modale : saisie/édition des identifiants de connexion PostgreSQL."""
 
     def __init__(self, parent, *, first_run=False):
+        _trace("DbConfigDialog.__init__")
         super().__init__(parent)
         self.saved = False
         self.title("Connexion à la base de données")
@@ -53,32 +70,35 @@ class DbConfigDialog(tk.Toplevel):
         self.bind("<Return>", lambda e: self._save())
         self.bind("<Escape>", lambda e: self._cancel())
 
-        # --- Rendre la fenêtre RÉELLEMENT visible ---
-        # On ne met PAS `transient(parent)` si le parent est masqué : sous
-        # Windows la fenêtre deviendrait invisible tout en bloquant.
-        self.update_idletasks()
+        # --- Affichage robuste (aucun appel bloquant : pas de wait_visibility) ---
+        _trace("dlg: widgets prêts")
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
         self._center_on_screen()
         self.deiconify()
         self.lift()
         try:
-            if parent is not None and parent.winfo_viewable():
-                self.transient(parent)
-        except Exception:
-            pass
-        try:
             self.attributes("-topmost", True)
-            self.after(400, self._drop_topmost)
+            self.after(500, self._drop_topmost)
         except Exception:
             pass
         try:
             self.focus_force()
         except Exception:
             pass
+        # grab_set en best-effort et différé : s'il échoue (fenêtre pas encore
+        # mappée) on réessaie, mais on ne bloque jamais.
+        self.after(50, self._try_grab)
+        _trace("dlg: __init__ terminé")
+
+    def _try_grab(self, tries=0):
         try:
-            self.wait_visibility()
             self.grab_set()
         except Exception:
-            pass
+            if tries < 10:
+                self.after(100, lambda: self._try_grab(tries + 1))
 
     # ---- helpers ----
     def _drop_topmost(self):
@@ -144,6 +164,9 @@ class DbConfigDialog(tk.Toplevel):
 
 def show_db_config_dialog(parent, first_run=False) -> bool:
     """Ouvre la modale. Retourne True si la config a été enregistrée."""
+    _trace("show_db_config_dialog: création")
     dlg = DbConfigDialog(parent, first_run=first_run)
-    parent.wait_window(dlg)
+    _trace("show_db_config_dialog: wait_window")
+    dlg.wait_window()
+    _trace(f"show_db_config_dialog: fermée (saved={dlg.saved})")
     return dlg.saved

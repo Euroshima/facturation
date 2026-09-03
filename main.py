@@ -293,51 +293,60 @@ def main():
 
     root = tk.Tk()
     _trace("tk.Tk() créé")
-    # NE PAS masquer le root ici : une fenêtre modale « transient » d'un root
-    # masqué devient invisible sous Windows tout en bloquant (freeze au
-    # démarrage). On donne tout de suite sa taille/titre au root.
     root.title(__app_name__)
     root.geometry("1200x800")
     apply_icon(root)
     _trace("apply_icon OK")
+    root.withdraw()  # caché tant que l'appli n'est pas prête
 
-    _trace("_ensure_db_configured…")
-    if not _ensure_db_configured(root):
-        _trace("db non configurée -> abandon")
-        root.destroy()
-        return
-    _trace("db joignable")
+    def _startup():
+        """Séquence de démarrage exécutée DANS la boucle d'événements Tk :
+        les fenêtres modales (config BDD…) ne fonctionnent de façon fiable
+        qu'une fois mainloop() lancée."""
+        _trace("_startup (dans mainloop)")
+        try:
+            _trace("_ensure_db_configured…")
+            if not _ensure_db_configured(root):
+                _trace("db non configurée -> fermeture")
+                root.destroy()
+                return
+            _trace("db joignable")
 
-    try:
-        init_db()
-        _trace("init_db OK")
-        ensure_my_info_in_db()
-        _trace("ensure_my_info_in_db OK")
-    except Exception as e:
-        messagebox.showerror(
-            f"{__app_name__} — base de données",
-            f"Erreur d'initialisation de la base :\n\n{e}",
-        )
-        root.destroy()
-        return
-
-    root.deiconify()
-    root.title(__app_name__)
-    root.geometry("1200x800")
-
-    style = ttk.Style()
-    for theme in ("vista", "clam", "alt", "default"):
-        if theme in style.theme_names():
+            init_db()
+            _trace("init_db OK")
+            ensure_my_info_in_db()
+            _trace("ensure_my_info_in_db OK")
+        except Exception as e:
+            _trace(f"ERREUR startup: {type(e).__name__}: {e}")
             try:
-                style.theme_use(theme)
-                break
+                messagebox.showerror(
+                    f"{__app_name__} — base de données",
+                    f"Erreur d'initialisation de la base :\n\n{e}",
+                )
             except Exception:
-                continue
+                pass
+            root.destroy()
+            return
 
-    _trace("construction App…")
-    App(root)
-    _trace("App construite — mainloop")
+        style = ttk.Style()
+        for theme in ("vista", "clam", "alt", "default"):
+            if theme in style.theme_names():
+                try:
+                    style.theme_use(theme)
+                    break
+                except Exception:
+                    continue
+
+        _trace("construction App…")
+        App(root)
+        _trace("App construite")
+        root.deiconify()
+        root.lift()
+
+    root.after(0, _startup)
+    _trace("mainloop")
     root.mainloop()
+    _trace("mainloop terminé")
 
 
 def _console_pause():
