@@ -1,5 +1,13 @@
 # Journal des versions
 
+## v1.1.2 — 3 septembre 2026
+
+- La release fournit en plus **`Facturation-debug-<version>.exe`** : même
+  application mais avec une fenêtre console qui affiche l'erreur exacte quand
+  « rien ne se passe » au démarrage. La fenêtre reste ouverte sur l'erreur.
+- Python de compilation ramené à **3.12** (compatible toutes éditions de
+  Windows 10/11 ; 3.13 exige Windows 10 1809 minimum).
+
 ## v1.1.1 — 3 septembre 2026
 
 - Retour à un **seul fichier `Facturation.exe`** (plus de dossier `_internal`).

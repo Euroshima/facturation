@@ -269,6 +269,16 @@ def main():
     root.mainloop()
 
 
+def _console_pause():
+    """Sur la variante avec console (Facturation-debug.exe), garde la fenêtre
+    ouverte pour qu'on puisse lire l'erreur."""
+    try:
+        if sys.stdout is not None and sys.stdout.isatty():
+            input("\n--- Appuyez sur Entrée pour fermer cette fenêtre ---\n")
+    except Exception:
+        pass
+
+
 def _guarded_start():
     """Démarrage protégé : toute erreur devient un journal + une boîte d'alerte."""
     try:
@@ -283,6 +293,7 @@ def _guarded_start():
             _report_startup_failure(exc)
         except Exception:
             pass
+        _console_pause()
         sys.exit(1)
 
 

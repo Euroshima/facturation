@@ -19,7 +19,9 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          # 3.12 : compatible avec toutes les éditions de Windows 10/11
+          # (3.13 exige Windows 10 1809+ minimum).
+          python-version: "3.12"
 
       - name: Install deps
         run: |
@@ -99,24 +101,48 @@ jobs:
           -n Facturation
           main.py
 
+      # Variante AVEC console : ouvre une fenêtre noire qui affiche toute
+      # erreur de démarrage (utile quand "rien ne se passe").
+      - name: Build debug exe (console)
+        run: >
+          pyinstaller
+          --onefile
+          --console
+          --noupx
+          --clean
+          --paths=src
+          --collect-all psycopg2
+          --hidden-import psycopg2
+          --hidden-import psycopg2._psycopg
+          --hidden-import psycopg2.extras
+          --add-data "CHANGELOG.md;."
+          --add-data "assets;assets"
+          --icon "assets/hytris.ico"
+          --version-file version_info.txt
+          -n Facturation-debug
+          main.py
+
       - name: Verify build output
         shell: pwsh
         run: |
-          if (-not (Test-Path "dist/Facturation.exe")) {
-            throw "dist/Facturation.exe est introuvable"
-          }
+          if (-not (Test-Path "dist/Facturation.exe")) { throw "dist/Facturation.exe est introuvable" }
+          if (-not (Test-Path "dist/Facturation-debug.exe")) { throw "dist/Facturation-debug.exe est introuvable" }
           (Get-Item "dist/Facturation.exe").Length
+          (Get-Item "dist/Facturation-debug.exe").Length
 
-      - name: Rename artifact
+      - name: Rename artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
           Move-Item dist/Facturation.exe out/Facturation-${{ steps.ver.outputs.version }}.exe
+          Move-Item dist/Facturation-debug.exe out/Facturation-debug-${{ steps.ver.outputs.version }}.exe
 
       - name: Upload exe to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: out/Facturation-${{ steps.ver.outputs.version }}.exe
+          files: |
+            out/Facturation-${{ steps.ver.outputs.version }}.exe
+            out/Facturation-debug-${{ steps.ver.outputs.version }}.exe
           tag_name: v${{ steps.ver.outputs.version }}
           name: "Facturation v${{ steps.ver.outputs.version }}"
         env:
