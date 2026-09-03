@@ -1,5 +1,17 @@
 # Journal des versions
 
+## v1.1.3 — 3 septembre 2026
+
+- **Correctif démarrage** : la vérification automatique de mise à jour au
+  lancement (ajoutée en 1.0.5) est retirée — c'est elle qui empêchait
+  l'application de s'ouvrir. La mise à jour reste accessible via
+  *Aide → Vérifier les mises à jour*.
+- Build ramené au strict nécessaire : plus de `--icon` ni de ressource de
+  version (une ressource PE mal formée peut empêcher le chargement de l'exe),
+  retour à Python 3.13.
+- `facturation-boot.log` : journal de démarrage étape par étape (à côté de
+  l'exe et dans `%TEMP%`) pour localiser tout blocage.
+
 ## v1.1.2 — 3 septembre 2026
 
 - La release fournit en plus **`Facturation-debug-<version>.exe`** : même

@@ -19,9 +19,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # 3.12 : compatible avec toutes les éditions de Windows 10/11
-          # (3.13 exige Windows 10 1809+ minimum).
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: Install deps
         run: |
@@ -34,91 +32,32 @@ jobs:
         shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      # Ressource de version Windows : identité de l'éditeur dans le binaire.
-      # Réduit fortement les faux positifs antivirus.
-      - name: Generate version_info.txt
-        shell: bash
-        env:
-          VERSION: ${{ steps.ver.outputs.version }}
-        run: |
-          python - <<'PY'
-          import os, re
-          raw = os.environ["VERSION"]
-          nums = [int(x) for x in re.findall(r"\d+", raw)][:4]
-          while len(nums) < 4:
-              nums.append(0)
-          tup = ", ".join(str(n) for n in nums)
-          dotted = ".".join(str(n) for n in nums)
-          tpl = """VSVersionInfo(
-            ffi=FixedFileInfo(
-              filevers=(%(tup)s),
-              prodvers=(%(tup)s),
-              mask=0x3f,
-              flags=0x0,
-              OS=0x40004,
-              fileType=0x1,
-              subtype=0x0,
-              date=(0, 0)
-            ),
-            kids=[
-              StringFileInfo([StringTable('040C04B0', [
-                StringStruct('CompanyName', 'Hytris'),
-                StringStruct('FileDescription', 'Hytris Facturation'),
-                StringStruct('FileVersion', '%(dotted)s'),
-                StringStruct('InternalName', 'Facturation'),
-                StringStruct('LegalCopyright', 'Copyright (c) 2026 Hytris. Tous droits reserves.'),
-                StringStruct('OriginalFilename', 'Facturation.exe'),
-                StringStruct('ProductName', 'Hytris Facturation'),
-                StringStruct('ProductVersion', '%(dotted)s')])]),
-              VarFileInfo([VarStruct('Translation', [0x040C, 1200])])
-            ]
-          )
-          """ % {"tup": tup, "dotted": dotted}
-          with open("version_info.txt", "w", encoding="utf-8") as f:
-              f.write(tpl)
-          print(tpl)
-          PY
-
-      # UN SEUL .exe. --noupx + ressource de version limitent les faux positifs.
-      # --collect-all psycopg2 embarque le module, l'extension binaire _psycopg
-      # et les DLL libpq/OpenSSL (sinon l'app ne démarre pas : DLL manquante).
+      # Build minimal (= celui qui fonctionnait avant). psycopg2 est embarqué
+      # par le hook automatique de PyInstaller ; pas de --icon ni --version-file
+      # (une ressource PE mal formée peut empêcher le chargement de l'exe).
       - name: Build exe with PyInstaller
         run: >
           pyinstaller
           --onefile
           --noconsole
-          --noupx
           --clean
           --paths=src
-          --collect-all psycopg2
-          --hidden-import psycopg2
-          --hidden-import psycopg2._psycopg
-          --hidden-import psycopg2.extras
           --add-data "CHANGELOG.md;."
           --add-data "assets;assets"
-          --icon "assets/hytris.ico"
-          --version-file version_info.txt
           -n Facturation
           main.py
 
-      # Variante AVEC console : ouvre une fenêtre noire qui affiche toute
-      # erreur de démarrage (utile quand "rien ne se passe").
+      # Variante AVEC console : fenêtre qui affiche le journal de démarrage
+      # étape par étape (facturation-boot.log) pour localiser un blocage.
       - name: Build debug exe (console)
         run: >
           pyinstaller
           --onefile
           --console
-          --noupx
           --clean
           --paths=src
-          --collect-all psycopg2
-          --hidden-import psycopg2
-          --hidden-import psycopg2._psycopg
-          --hidden-import psycopg2.extras
           --add-data "CHANGELOG.md;."
           --add-data "assets;assets"
-          --icon "assets/hytris.ico"
-          --version-file version_info.txt
           -n Facturation-debug
           main.py
 

@@ -15,9 +15,55 @@ import sys
 import traceback
 
 ERROR_LOG_NAME = "facturation-error.log"
+BOOT_LOG_NAME = "facturation-boot.log"
 
 # Gardé en global : le fichier doit rester ouvert tant que faulthandler écrit.
 _FAULT_FILE = None
+
+
+# ---------- Traçage du démarrage étape par étape ----------
+def _boot_log_paths():
+    paths = []
+    try:
+        paths.append(os.path.join(os.path.dirname(os.path.abspath(sys.executable)), BOOT_LOG_NAME))
+    except Exception:
+        pass
+    try:
+        import tempfile
+        paths.append(os.path.join(tempfile.gettempdir(), BOOT_LOG_NAME))
+    except Exception:
+        pass
+    return paths
+
+
+def _trace(msg):
+    """Écrit une étape de démarrage dans facturation-boot.log (à côté de l'exe
+    et dans %TEMP%) + sur la console si elle existe. Chaque écriture est flushée
+    pour qu'on voie où ça bloque, même en cas de gel."""
+    line = f"{datetime.datetime.now():%H:%M:%S.%f} | {msg}\n"
+    for p in _boot_log_paths():
+        try:
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(line)
+                f.flush()
+        except Exception:
+            pass
+    try:
+        if sys.stdout is not None:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+    except Exception:
+        pass
+
+
+def _reset_boot_log():
+    for p in _boot_log_paths():
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(f"=== démarrage {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ===\n")
+                f.flush()
+        except Exception:
+            pass
 
 
 # ---------- Sécurité --noconsole : sys.stdout / sys.stderr peuvent être None ----------
@@ -222,28 +268,41 @@ def _ensure_db_configured(root):
 
 
 def main():
+    _trace("main() début")
     import tkinter as tk
     from tkinter import ttk, messagebox
+    _trace("tkinter importé")
 
     from core.db import init_db
+    _trace("core.db importé")
     from ui.app import App
+    _trace("ui.app importé")
     from ui.appicon import apply_icon
     from core.version import __app_name__
+    _trace("imports projet OK")
 
     _improve_windows_ui()
     ensure_dirs()
+    _trace("ensure_dirs OK")
 
     root = tk.Tk()
+    _trace("tk.Tk() créé")
     root.withdraw()
     apply_icon(root)
+    _trace("apply_icon OK")
 
+    _trace("_ensure_db_configured…")
     if not _ensure_db_configured(root):
+        _trace("db non configurée -> abandon")
         root.destroy()
         return
+    _trace("db joignable")
 
     try:
         init_db()
+        _trace("init_db OK")
         ensure_my_info_in_db()
+        _trace("ensure_my_info_in_db OK")
     except Exception as e:
         messagebox.showerror(
             f"{__app_name__} — base de données",
@@ -265,7 +324,9 @@ def main():
             except Exception:
                 continue
 
+    _trace("construction App…")
     App(root)
+    _trace("App construite — mainloop")
     root.mainloop()
 
 
@@ -282,13 +343,23 @@ def _console_pause():
 def _guarded_start():
     """Démarrage protégé : toute erreur devient un journal + une boîte d'alerte."""
     try:
+        _reset_boot_log()
+        _trace("guarded_start")
         _ensure_std_streams()
+        _trace("std streams OK")
         _enable_faulthandler()
+        _trace("faulthandler OK")
         _bootstrap_sys_path()
+        _trace("bootstrap sys.path OK")
         main()
+        _trace("main() terminé normalement")
     except SystemExit:
         raise
     except BaseException as exc:  # noqa: BLE001 — on veut vraiment tout attraper
+        try:
+            _trace(f"ERREUR: {type(exc).__name__}: {exc}")
+        except Exception:
+            pass
         try:
             _report_startup_failure(exc)
         except Exception:
