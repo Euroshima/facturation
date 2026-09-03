@@ -1,25 +1,14 @@
 # src/ui/db_config_dialog.py — fenêtre de configuration de la connexion BDD
-import datetime
-import os
-import sys
-import tempfile
 import tkinter as tk
 from tkinter import ttk, messagebox
 
 from core.dbconfig import read_saved_config, save_db_config, build_url
 from core.db import try_connect
+from core.debuglog import trace as _dbg
 
 
 def _trace(msg):
-    """Trace dans facturation-boot.log (même fichier que main.py)."""
-    line = f"{datetime.datetime.now():%H:%M:%S.%f} | [dlg] {msg}\n"
-    for base in (os.path.dirname(os.path.abspath(sys.executable)), tempfile.gettempdir()):
-        try:
-            with open(os.path.join(base, "facturation-boot.log"), "a", encoding="utf-8") as f:
-                f.write(line)
-                f.flush()
-        except Exception:
-            pass
+    _dbg(f"[dlg] {msg}")
 
 _FIELDS = [
     ("host", "Hôte / IP", False),

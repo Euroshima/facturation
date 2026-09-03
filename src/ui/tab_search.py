@@ -7,6 +7,7 @@ from core.paths import invoice_pdf_path
 from core.db import search_invoices, get_invoice_with_items, set_pdf_path
 from pdf.pdfgen import create_pdf
 from .widgets import make_sortable
+from .send_email_dialog import show_send_email_dialog
 
 class TabSearch(ttk.Frame):
     def __init__(self, master, controller):
@@ -24,6 +25,7 @@ class TabSearch(ttk.Frame):
         ttk.Button(st, text="Modifier", command=self._load_selected_for_edit).pack(side="left", padx=6)
         ttk.Button(st, text="Recréer PDF", command=self._rebuild_pdf_selected).pack(side="left")
         ttk.Button(st, text="Ouvrir PDF", command=self._open_selected_pdf).pack(side="left", padx=6)
+        ttk.Button(st, text="Envoyer par e-mail", command=self._email_selected).pack(side="left")
 
         self.tree = ttk.Treeview(
             self,
@@ -118,35 +120,60 @@ class TabSearch(ttk.Frame):
         c.refresh_totals()
         messagebox.showinfo("Édition", f"Édition de la facture {inv.get('facture_num')} (onglet Création).")
 
-    def _rebuild_pdf_selected(self):
-        sel = self.tree.selection()
-        if not sel:
-            return messagebox.showinfo("PDF","Sélectionne une facture.")
-        inv_id = self.tree.item(sel[0], "values")[0]
+    def _regen_pdf(self, inv_id):
+        """(Re)génère le PDF de la facture. Retourne (pdf_path, inv, client) ou (None, ..)."""
         inv, client, items = get_invoice_with_items(inv_id)
         if not inv:
-            return messagebox.showerror("PDF", "Facture introuvable en base.")
-
+            return None, None, None
         pdf_path = invoice_pdf_path(client, inv["facture_num"])
-        items_dict = [{"description": it["description"], "qty": float(it["qty"]), "price": float(it["price"]), "unit": it.get("unit","kg"), "total": float(it["total"])} for it in items]
+        items_dict = [{"description": it["description"], "qty": float(it["qty"]),
+                       "price": float(it["price"]), "unit": it.get("unit", "kg"),
+                       "total": float(it["total"])} for it in items]
         try:
-            tva_rate = (float(inv.get("tva",0)) / float(inv.get("subtotal",1))) * 100 if inv.get("subtotal") else 0.0
+            tva_rate = (float(inv.get("tva", 0)) / float(inv.get("subtotal", 1))) * 100 if inv.get("subtotal") else 0.0
         except Exception:
             tva_rate = 0.0
-
         inv_obj = {
             "facture_num": inv.get("facture_num"),
             "date": inv.get("date"),
             "subtotal": inv.get("subtotal"),
             "tva": inv.get("tva"),
             "total": inv.get("total"),
-            "notes": inv.get("notes",""),
+            "notes": inv.get("notes", ""),
             "tva_rate": tva_rate,
         }
         create_pdf(inv_obj, client, items_dict, pdf_path)
         set_pdf_path(inv_id, pdf_path)
+        return pdf_path, inv, client
+
+    def _rebuild_pdf_selected(self):
+        sel = self.tree.selection()
+        if not sel:
+            return messagebox.showinfo("PDF", "Sélectionne une facture.")
+        inv_id = self.tree.item(sel[0], "values")[0]
+        pdf_path, inv, _ = self._regen_pdf(inv_id)
+        if not pdf_path:
+            return messagebox.showerror("PDF", "Facture introuvable en base.")
         messagebox.showinfo("PDF", "PDF régénéré.")
         self.controller.open_path(pdf_path)
+
+    def _email_selected(self):
+        sel = self.tree.selection()
+        if not sel:
+            return messagebox.showinfo("E-mail", "Sélectionne une facture.")
+        inv_id = self.tree.item(sel[0], "values")[0]
+        try:
+            pdf_path, inv, client = self._regen_pdf(inv_id)
+        except Exception as e:
+            return messagebox.showerror("E-mail", f"Impossible de préparer le PDF :\n{e}")
+        if not pdf_path:
+            return messagebox.showerror("E-mail", "Facture introuvable en base.")
+        show_send_email_dialog(
+            self.winfo_toplevel(),
+            facture_num=inv.get("facture_num"),
+            to_addr=(client or {}).get("email", ""),
+            pdf_path=pdf_path,
+        )
 
     def _open_selected_pdf(self):
         sel = self.tree.selection()

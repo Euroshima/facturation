@@ -15,55 +15,26 @@ import sys
 import traceback
 
 ERROR_LOG_NAME = "facturation-error.log"
-BOOT_LOG_NAME = "facturation-boot.log"
 
 # Gardé en global : le fichier doit rester ouvert tant que faulthandler écrit.
 _FAULT_FILE = None
 
 
-# ---------- Traçage du démarrage étape par étape ----------
-def _boot_log_paths():
-    paths = []
-    try:
-        paths.append(os.path.join(os.path.dirname(os.path.abspath(sys.executable)), BOOT_LOG_NAME))
-    except Exception:
-        pass
-    try:
-        import tempfile
-        paths.append(os.path.join(tempfile.gettempdir(), BOOT_LOG_NAME))
-    except Exception:
-        pass
-    return paths
-
-
+# ---------- Traçage du démarrage (désactivé par défaut, cf. core/debuglog) ----------
 def _trace(msg):
-    """Écrit une étape de démarrage dans facturation-boot.log (à côté de l'exe
-    et dans %TEMP%) + sur la console si elle existe. Chaque écriture est flushée
-    pour qu'on voie où ça bloque, même en cas de gel."""
-    line = f"{datetime.datetime.now():%H:%M:%S.%f} | {msg}\n"
-    for p in _boot_log_paths():
-        try:
-            with open(p, "a", encoding="utf-8") as f:
-                f.write(line)
-                f.flush()
-        except Exception:
-            pass
     try:
-        if sys.stdout is not None:
-            sys.stdout.write(line)
-            sys.stdout.flush()
+        from core.debuglog import trace
+        trace(msg)
     except Exception:
         pass
 
 
 def _reset_boot_log():
-    for p in _boot_log_paths():
-        try:
-            with open(p, "w", encoding="utf-8") as f:
-                f.write(f"=== démarrage {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ===\n")
-                f.flush()
-        except Exception:
-            pass
+    try:
+        from core.debuglog import reset
+        reset()
+    except Exception:
+        pass
 
 
 # ---------- Sécurité --noconsole : sys.stdout / sys.stderr peuvent être None ----------
@@ -362,14 +333,11 @@ def _console_pause():
 def _guarded_start():
     """Démarrage protégé : toute erreur devient un journal + une boîte d'alerte."""
     try:
-        _reset_boot_log()
-        _trace("guarded_start")
         _ensure_std_streams()
-        _trace("std streams OK")
         _enable_faulthandler()
-        _trace("faulthandler OK")
         _bootstrap_sys_path()
-        _trace("bootstrap sys.path OK")
+        _reset_boot_log()
+        _trace("guarded_start — streams/faulthandler/path OK")
         main()
         _trace("main() terminé normalement")
     except SystemExit:

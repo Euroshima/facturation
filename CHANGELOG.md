@@ -1,5 +1,23 @@
 # Journal des versions
 
+## v1.2.0 — 3 septembre 2026
+
+- **Paramètres → Mon entreprise…** : nom, adresse, SIRET, TVA intracom, IBAN,
+  BIC, délai de paiement, mentions légales, pied de page… éditables dans
+  l'application (stockés dans `%APPDATA%\Facturation\facturation.ini`).
+  Plus besoin de recompiler pour changer l'adresse ou l'IBAN sur les factures.
+- **Envoi de la facture par e-mail** (onglet Rechercher → *Envoyer par
+  e-mail*) :
+  - envoi direct via **SMTP** (Paramètres → *E-mail (SMTP)…* : serveur, port,
+    identifiants, sécurité starttls/ssl ; bouton « Envoyer un test ») avec le
+    PDF en pièce jointe ;
+  - ou **« Ouvrir dans ma messagerie »** (mailto pré-rempli) si le SMTP n'est
+    pas configuré.
+  Le PDF est régénéré à la volée avant l'envoi.
+- Journal de démarrage (`facturation-boot.log`) **désactivé par défaut** :
+  activable via un fichier `debug.txt` à côté de l'exe ou la variable
+  `FACT_DEBUG=1`. Plus de fichier qui traîne en usage normal.
+
 ## v1.1.6 — 3 septembre 2026
 
 - **PDF amélioré** :

@@ -13,6 +13,8 @@ from .tab_create import TabCreate
 from .tab_search import TabSearch
 from .tab_clients import TabClients
 from .db_config_dialog import show_db_config_dialog
+from .company_dialog import show_company_dialog
+from .smtp_dialog import show_smtp_dialog
 
 
 class App(ttk.Frame):
@@ -40,6 +42,9 @@ class App(ttk.Frame):
         master.config(menu=menubar)
 
         menu_param = tk.Menu(menubar, tearoff=0)
+        menu_param.add_command(label="Mon entreprise…", command=self.edit_company)
+        menu_param.add_command(label="E-mail (SMTP)…", command=self.edit_smtp)
+        menu_param.add_separator()
         menu_param.add_command(label="Connexion à la base de données…", command=self.edit_db_config)
         menubar.add_cascade(label="Paramètres", menu=menu_param)
 
@@ -75,6 +80,15 @@ class App(ttk.Frame):
         # le menu Aide → « Vérifier les mises à jour ».
 
     # -------- actions menu --------
+    def edit_company(self):
+        if show_company_dialog(self.winfo_toplevel()):
+            messagebox.showinfo("Paramètres",
+                                "Informations entreprise enregistrées. Elles seront "
+                                "utilisées sur les prochaines factures PDF.")
+
+    def edit_smtp(self):
+        show_smtp_dialog(self.winfo_toplevel())
+
     def edit_db_config(self):
         if show_db_config_dialog(self.winfo_toplevel()):
             messagebox.showinfo(
