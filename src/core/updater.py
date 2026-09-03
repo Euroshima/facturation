@@ -184,12 +184,16 @@ def _ask_yesno(title: str, msg: str) -> bool:
 
 def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
     """Écrit un .bat qui : attend la fin de l'app (par PID), attend que l'exe
-    soit déverrouillé, le remplace par la nouvelle version, relance, se supprime.
+    soit réellement déverrouillé, l'écrase par la nouvelle version, relance,
+    puis se supprime.
 
-    IMPORTANT : `timeout` ne fonctionne pas quand le .bat tourne sans console
-    (processus détaché) -> on temporise avec `ping`. Et le .exe reste verrouillé
-    quelques secondes après la fermeture (bootloader onefile / antivirus /
-    OneDrive) -> on réessaie en boucle.
+    Deux pièges appris à nos dépens :
+    - `timeout` ne fonctionne pas quand le .bat tourne sans console -> `ping`.
+    - il ne faut SURTOUT PAS renommer l'ancien exe : Windows l'autorise même
+      s'il tourne encore, et le bootloader PyInstaller échoue alors avec
+      « Security validation failure: failed to obtain executable path for
+      parent process ». On attend donc que le fichier soit libérable (test
+      d'ouverture en ajout) puis on l'écrase directement.
     """
     bat = os.path.join(tempfile.gettempdir(), "facturation_update.bat")
     log = os.path.join(tempfile.gettempdir(), "facturation_update_bat.log")
@@ -216,28 +220,29 @@ def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
         '    echo [%date% %time%] ATTENTE ABANDONNEE (w=!w!) >> "%LOG%"\r\n'
         ")\r\n"
         'echo [%date% %time%] process termine (w=!w!) >> "%LOG%"\r\n'
+        # Nettoyage d'un éventuel reliquat d'une ancienne tentative
         'del "%OLD%.old" >nul 2>&1\r\n'
-        # 2) libérer l'ancien exe : le RENOMMER d'abord (réussit souvent même
-        #    quand la suppression échoue sur un fichier encore verrouillé),
-        #    sinon tenter la suppression ; on réessaie (~90 s max)
+        # 2) ATTENDRE que l'ancien exe soit réellement DÉVERROUILLÉ.
+        #    On NE le renomme JAMAIS : renommer l'image d'un process encore
+        #    vivant casse le contrôle de sécurité du bootloader PyInstaller
+        #    ("failed to obtain executable path for parent process").
+        #    Test de verrou : tenter de l'ouvrir en ajout.
         "set /a n=0\r\n"
-        ":swap\r\n"
-        'move /y "%OLD%" "%OLD%.old" >nul 2>&1\r\n'
-        'if exist "%OLD%" del "%OLD%" >nul 2>&1\r\n'
-        'if exist "%OLD%" (\r\n'
-        "    set /a n+=1\r\n"
-        "    if !n! lss 30 (\r\n"
-        "        ping -n 4 127.0.0.1 >nul\r\n"
-        "        goto swap\r\n"
-        "    )\r\n"
-        '    echo [%date% %time%] ECHEC liberation de OLD (n=!n!) >> "%LOG%"\r\n'
+        ":waitlock\r\n"
+        '2>nul (>>"%OLD%" call ) && goto unlocked\r\n'
+        "set /a n+=1\r\n"
+        "if !n! lss 45 (\r\n"
+        "    ping -n 3 127.0.0.1 >nul\r\n"
+        "    goto waitlock\r\n"
         ")\r\n"
-        # 3) mettre la nouvelle version en place
+        'echo [%date% %time%] TOUJOURS VERROUILLE apres !n! essais >> "%LOG%"\r\n'
+        ":unlocked\r\n"
+        'echo [%date% %time%] exe libere (n=!n!) >> "%LOG%"\r\n'
+        # 3) écraser directement l'ancien par le nouveau
         'move /y "%NEW%" "%OLD%" >nul 2>&1\r\n'
         'echo [%date% %time%] apres move : essais=!n! >> "%LOG%"\r\n'
         'if exist "%OLD%" (echo   OLD present >> "%LOG%") else (echo   OLD ABSENT >> "%LOG%")\r\n'
         'if exist "%NEW%" (echo   NEW encore present >> "%LOG%") else (echo   NEW consomme >> "%LOG%")\r\n'
-        'del "%OLD%.old" >nul 2>&1\r\n'
         # 4) relancer : si le move a réussi, %NEW% a disparu -> on lance %OLD%
         #    (nouveau contenu). Sinon repli sur %NEW%.
         'if not exist "%NEW%" (\r\n'
@@ -255,6 +260,22 @@ def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
     with open(bat, "w", encoding="cp1252", errors="replace", newline="") as f:
         f.write(content)
     return bat
+
+
+def cleanup_leftovers():
+    """Supprime les reliquats d'une mise à jour précédente (Facturation.update.exe,
+    Facturation.exe.old). Best-effort, silencieux."""
+    try:
+        exe = _current_exe_path()
+        for path in (_staged_exe_path(), exe + ".old"):
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+                    _log.info("reliquat supprimé : %s", path)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 def _stage_new_exe(asset_url: str) -> str:
@@ -403,6 +424,9 @@ def check_for_update_async(on_available):
     """
     if not getattr(sys, "frozen", False):
         return
+
+    # Une mise à jour vient peut-être d'aboutir : on efface ses reliquats.
+    cleanup_leftovers()
 
     def _work():
         try:

@@ -1,5 +1,17 @@
 # Journal des versions
 
+## v1.2.9 — 3 septembre 2026
+
+- **Correctif « Security validation failure » après mise à jour.** Le script
+  renommait l'ancien `.exe` en `.exe.old` — Windows l'autorise même si le
+  programme tourne encore, mais le bootloader PyInstaller ne retrouve alors
+  plus son image et refuse de démarrer.
+  Le script **ne renomme plus rien** : il attend que le fichier soit
+  réellement déverrouillé (test d'ouverture, ~2 min max) puis l'écrase
+  directement.
+- Nettoyage automatique au lancement des reliquats
+  (`Facturation.update.exe`, `Facturation.exe.old`).
+
 ## v1.2.8 — 3 septembre 2026
 
 - Version de test de la mise à jour automatique (aucun changement de code par
