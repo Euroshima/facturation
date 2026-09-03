@@ -201,37 +201,53 @@ def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
         f'set "NEW={new_exe}"\r\n'
         f'set "LOG={log}"\r\n'
         'echo [%date% %time%] debut PID=%PID% > "%LOG%"\r\n'
-        # 1) attendre la fin du process applicatif
+        'echo   OLD=%OLD% >> "%LOG%"\r\n'
+        'echo   NEW=%NEW% >> "%LOG%"\r\n'
+        # 1) attendre la fin du process applicatif (borné : ~60 s max)
+        "set /a w=0\r\n"
         ":wait\r\n"
         'tasklist /fi "PID eq %PID%" 2>nul | find "%PID%" >nul\r\n'
         "if not errorlevel 1 (\r\n"
-        "    ping -n 2 127.0.0.1 >nul\r\n"
-        "    goto wait\r\n"
+        "    set /a w+=1\r\n"
+        "    if !w! lss 30 (\r\n"
+        "        ping -n 3 127.0.0.1 >nul\r\n"
+        "        goto wait\r\n"
+        "    )\r\n"
+        '    echo [%date% %time%] ATTENTE ABANDONNEE (w=!w!) >> "%LOG%"\r\n'
         ")\r\n"
-        'echo [%date% %time%] process termine >> "%LOG%"\r\n'
+        'echo [%date% %time%] process termine (w=!w!) >> "%LOG%"\r\n'
         'del "%OLD%.old" >nul 2>&1\r\n'
-        # 2) libérer l'ancien exe : d'abord del, sinon le renommer de côté ;
-        #    on réessaie tant qu'il est verrouillé (jusqu'à ~80 s)
+        # 2) libérer l'ancien exe : le RENOMMER d'abord (réussit souvent même
+        #    quand la suppression échoue sur un fichier encore verrouillé),
+        #    sinon tenter la suppression ; on réessaie (~90 s max)
         "set /a n=0\r\n"
         ":swap\r\n"
-        'del "%OLD%" >nul 2>&1\r\n'
-        'if exist "%OLD%" move /y "%OLD%" "%OLD%.old" >nul 2>&1\r\n'
+        'move /y "%OLD%" "%OLD%.old" >nul 2>&1\r\n'
+        'if exist "%OLD%" del "%OLD%" >nul 2>&1\r\n'
         'if exist "%OLD%" (\r\n'
         "    set /a n+=1\r\n"
-        "    if !n! lss 40 (\r\n"
-        "        ping -n 3 127.0.0.1 >nul\r\n"
+        "    if !n! lss 30 (\r\n"
+        "        ping -n 4 127.0.0.1 >nul\r\n"
         "        goto swap\r\n"
         "    )\r\n"
+        '    echo [%date% %time%] ECHEC liberation de OLD (n=!n!) >> "%LOG%"\r\n'
         ")\r\n"
         # 3) mettre la nouvelle version en place
         'move /y "%NEW%" "%OLD%" >nul 2>&1\r\n'
-        'echo [%date% %time%] essais=!n! ancien_present=%errorlevel% >> "%LOG%"\r\n'
+        'echo [%date% %time%] apres move : essais=!n! >> "%LOG%"\r\n'
+        'if exist "%OLD%" (echo   OLD present >> "%LOG%") else (echo   OLD ABSENT >> "%LOG%")\r\n'
+        'if exist "%NEW%" (echo   NEW encore present >> "%LOG%") else (echo   NEW consomme >> "%LOG%")\r\n'
         'del "%OLD%.old" >nul 2>&1\r\n'
-        # 4) relancer : si le remplacement a réussi, %NEW% n'existe plus -> on
-        #    lance %OLD% (= nouveau contenu). Sinon on lance %NEW% (nouveau,
-        #    mais nom .update.exe) pour au moins tourner sur la dernière version.
-        'if not exist "%NEW%" ( start "" "%OLD%" ) else ( start "" "%NEW%" )\r\n'
-        'echo [%date% %time%] relance faite >> "%LOG%"\r\n'
+        # 4) relancer : si le move a réussi, %NEW% a disparu -> on lance %OLD%
+        #    (nouveau contenu). Sinon repli sur %NEW%.
+        'if not exist "%NEW%" (\r\n'
+        '    echo [%date% %time%] lancement %OLD% >> "%LOG%"\r\n'
+        '    start "" "%OLD%"\r\n'
+        ") else (\r\n"
+        '    echo [%date% %time%] REPLI lancement %NEW% >> "%LOG%"\r\n'
+        '    start "" "%NEW%"\r\n'
+        ")\r\n"
+        'echo [%date% %time%] termine >> "%LOG%"\r\n'
         'del "%~f0"\r\n'
     )
     # cmd.exe lit un .bat dans le codepage ANSI (cp1252 sur Windows FR) : on
@@ -265,12 +281,18 @@ def _swap_and_restart(remote_tag: str, new_exe: str):
         )
         bat = _write_swap_script(os.getpid(), old_exe, new_exe)
         _log.info("lancement du script de bascule %s", bat)
-        subprocess.Popen(
-            ["cmd", "/c", bat],
-            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-            close_fds=True,
-        )
+        # CREATE_NO_WINDOW : pas de fenêtre console qui traîne.
+        # CREATE_NEW_PROCESS_GROUP + BREAKAWAY : le .bat survit à notre sortie.
+        flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                 | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000))
+        try:
+            subprocess.Popen(["cmd", "/c", bat], creationflags=flags, close_fds=True)
+        except OSError:
+            # CREATE_BREAKAWAY_FROM_JOB peut être refusé selon le job object
+            flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                     | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+            subprocess.Popen(["cmd", "/c", bat], creationflags=flags, close_fds=True)
         os._exit(0)
     except Exception as e:
         _log.exception("échec de la bascule")

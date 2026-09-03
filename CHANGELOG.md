@@ -1,5 +1,18 @@
 # Journal des versions
 
+## v1.2.7 — 3 septembre 2026
+
+- **Mise à jour : remplacement de l'exe plus robuste.**
+  - On **renomme** l'ancien exe de côté avant de le supprimer : le renommage
+    réussit souvent là où la suppression échoue sur un fichier encore
+    verrouillé (bootloader one-file, antivirus, OneDrive).
+  - Les boucles d'attente sont **bornées** (≈60 s pour la fermeture, ≈90 s
+    pour la libération) : plus de script qui tourne indéfiniment.
+  - Le script s'exécute désormais **sans fenêtre console** (`CREATE_NO_WINDOW`)
+    et survit à la fermeture de l'application.
+  - Journal détaillé : `%TEMP%\facturation_update_bat.log` (état de OLD/NEW,
+    nombre d'essais, action finale).
+
 ## v1.2.6 — 3 septembre 2026
 
 - Version de test du signalement de mise à jour (aucun changement fonctionnel
