@@ -77,17 +77,16 @@ jobs:
           print(tpl)
           PY
 
-      # --onedir + --noupx + ressource de version : bien moins de faux positifs
-      # antivirus que --onefile. --collect-all psycopg2 embarque le module,
-      # l'extension binaire _psycopg et les DLL libpq/OpenSSL.
-      - name: Build app with PyInstaller
+      # UN SEUL .exe. --noupx + ressource de version limitent les faux positifs.
+      # --collect-all psycopg2 embarque le module, l'extension binaire _psycopg
+      # et les DLL libpq/OpenSSL (sinon l'app ne démarre pas : DLL manquante).
+      - name: Build exe with PyInstaller
         run: >
           pyinstaller
-          --onedir
+          --onefile
           --noconsole
           --noupx
           --clean
-          --noconfirm
           --paths=src
           --collect-all psycopg2
           --hidden-import psycopg2
@@ -103,21 +102,21 @@ jobs:
       - name: Verify build output
         shell: pwsh
         run: |
-          if (-not (Test-Path "dist/Facturation/Facturation.exe")) {
-            throw "dist/Facturation/Facturation.exe est introuvable"
+          if (-not (Test-Path "dist/Facturation.exe")) {
+            throw "dist/Facturation.exe est introuvable"
           }
-          Get-ChildItem -Recurse dist/Facturation | Where-Object { $_.Name -like "*psycopg*" -or $_.Name -like "libpq*" } | Select-Object FullName
+          (Get-Item "dist/Facturation.exe").Length
 
       - name: Rename artifact
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          Compress-Archive -Path dist/Facturation -DestinationPath out/Facturation-${{ steps.ver.outputs.version }}.zip -Force
+          Move-Item dist/Facturation.exe out/Facturation-${{ steps.ver.outputs.version }}.exe
 
-      - name: Upload archive to GitHub Release
+      - name: Upload exe to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: out/Facturation-${{ steps.ver.outputs.version }}.zip
+          files: out/Facturation-${{ steps.ver.outputs.version }}.exe
           tag_name: v${{ steps.ver.outputs.version }}
           name: "Facturation v${{ steps.ver.outputs.version }}"
         env:

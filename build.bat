@@ -3,11 +3,11 @@ REM ==================================================
 REM Script de build pour l'app Facturation
 REM - Nettoie les anciens fichiers
 REM - Installe/Met a jour PyInstaller si besoin
-REM - Genere l'application avec PyInstaller (mode dossier)
+REM - Genere UN SEUL .exe avec PyInstaller
 REM
-REM NOTE IMPORTANTE : version_info.txt (ressource de version Windows) doit
-REM etre mis a jour EN MEME TEMPS que src\core\version.py (__version__).
-REM En CI, ce fichier est regenere automatiquement depuis le tag git.
+REM NOTE : version_info.txt (ressource de version Windows) doit etre mis a jour
+REM EN MEME TEMPS que src\core\version.py (__version__). En CI, ce fichier est
+REM regenere automatiquement depuis le tag git.
 REM ==================================================
 
 echo [1/4] Nettoyage des anciens builds...
@@ -19,19 +19,18 @@ py -m pip install -r requirements.txt >nul
 py -m pip install pyinstaller >nul
 
 echo [3/4] Compilation avec PyInstaller...
-REM --onedir          : distribution en dossier (bien moins de faux positifs antivirus que --onefile)
-REM --noupx           : pas de compression UPX (UPX est un marqueur classique de malware pour les AV)
+REM --onefile         : un seul fichier .exe
+REM --noupx           : pas de compression UPX (marqueur classique de malware pour les AV)
 REM --version-file    : ressource de version Windows (editeur, description, version)
 REM --paths=src       : ajoute le dossier src au PYTHONPATH
 REM --collect-all psycopg2 : embarque le driver Postgres COMPLET (module + _psycopg + DLL libpq)
 REM --hidden-import   : securite supplementaire pour l'extension binaire
-REM -n Facturation    : nom de l'application generee
+REM -n Facturation    : nom de l'exe genere
 py -m PyInstaller ^
-    --onedir ^
+    --onefile ^
     --noconsole ^
     --noupx ^
     --clean ^
-    --noconfirm ^
     --paths=src ^
     --collect-all psycopg2 ^
     --hidden-import psycopg2 ^
@@ -45,7 +44,6 @@ py -m PyInstaller ^
     main.py
 
 echo [4/4] Termine !
-echo L'application se trouve dans: dist\Facturation\Facturation.exe
-echo (Distribuez le DOSSIER dist\Facturation en entier, pas seulement l'exe.)
+echo Ton executable : dist\Facturation.exe
 
 pause

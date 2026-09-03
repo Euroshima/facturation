@@ -1,5 +1,14 @@
 # Journal des versions
 
+## v1.1.1 — 3 septembre 2026
+
+- Retour à un **seul fichier `Facturation.exe`** (plus de dossier `_internal`).
+  Les garde-fous de la 1.1.0 sont conservés : `psycopg2` embarqué en entier,
+  ressource de version Windows, compression UPX désactivée, et surtout le
+  **journal d'erreur au démarrage** (`facturation-error.log` à côté de l'exe et
+  dans `%TEMP%`) qui explique tout refus de démarrage.
+- Mise à jour automatique de nouveau basée sur l'échange d'un `.exe`.
+
 ## v1.1.0 — 2 septembre 2026
 
 - **Distribution en dossier** : l'application n'est plus un unique `.exe` mais
