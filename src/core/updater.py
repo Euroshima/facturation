@@ -200,6 +200,15 @@ def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
     content = (
         "@echo off\r\n"
         "setlocal enabledelayedexpansion\r\n"
+        # Ceinture et bretelles : on efface aussi ici les variables internes de
+        # PyInstaller, pour que l'exe relancé démarre comme un lancement normal.
+        'set "_MEIPASS="\r\n'
+        'set "_MEIPASS2="\r\n'
+        'set "_PYI_ARCHIVE_FILE="\r\n'
+        'set "_PYI_APPLICATION_HOME_DIR="\r\n'
+        'set "_PYI_PARENT_PROCESS_LEVEL="\r\n'
+        'set "_PYI_SPLASH_IPC="\r\n'
+        'set "_PYIBOOT_UNBUFFERED="\r\n'
         f'set "PID={pid}"\r\n'
         f'set "OLD={old_exe}"\r\n'
         f'set "NEW={new_exe}"\r\n'
@@ -262,6 +271,31 @@ def _write_swap_script(pid: int, old_exe: str, new_exe: str) -> str:
     return bat
 
 
+def _clean_env() -> dict:
+    """Environnement débarrassé des variables internes de PyInstaller.
+
+    Un processus lancé depuis l'app gelée hérite de `_PYI_ARCHIVE_FILE`,
+    `_PYI_PARENT_PROCESS_LEVEL`, `_MEIPASS2`… Le nouvel exe croit alors être le
+    processus *enfant* d'un bootloader parent, cherche ce parent et échoue avec
+    « Security validation failure: failed to obtain executable path for parent
+    process ». On les retire donc avant de lancer le script de bascule.
+    """
+    drop_prefixes = ("_PYI",)
+    drop_exact = {"_MEIPASS", "_MEIPASS2", "_PYIBOOT_UNBUFFERED", "PYINSTALLER_RESET_ENVIRONMENT"}
+    env = {}
+    for k, v in os.environ.items():
+        if k in drop_exact or any(k.startswith(p) for p in drop_prefixes):
+            continue
+        env[k] = v
+    # PyInstaller sauvegarde parfois les valeurs d'origine dans *_ORIG
+    for var in ("PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+        orig = os.environ.get(var + "_ORIG")
+        if orig is not None:
+            env[var] = orig
+            env.pop(var + "_ORIG", None)
+    return env
+
+
 def cleanup_leftovers():
     """Supprime les reliquats d'une mise à jour précédente (Facturation.update.exe,
     Facturation.exe.old). Best-effort, silencieux."""
@@ -307,13 +341,18 @@ def _swap_and_restart(remote_tag: str, new_exe: str):
         flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
                  | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
                  | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000))
+        # env nettoyé : sinon le nouvel exe hérite des variables PyInstaller
+        # et refuse de démarrer (cf. _clean_env).
+        env = _clean_env()
         try:
-            subprocess.Popen(["cmd", "/c", bat], creationflags=flags, close_fds=True)
+            subprocess.Popen(["cmd", "/c", bat], creationflags=flags,
+                             close_fds=True, env=env)
         except OSError:
             # CREATE_BREAKAWAY_FROM_JOB peut être refusé selon le job object
             flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
                      | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-            subprocess.Popen(["cmd", "/c", bat], creationflags=flags, close_fds=True)
+            subprocess.Popen(["cmd", "/c", bat], creationflags=flags,
+                             close_fds=True, env=env)
         os._exit(0)
     except Exception as e:
         _log.exception("échec de la bascule")

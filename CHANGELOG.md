@@ -1,5 +1,15 @@
 # Journal des versions
 
+## v1.3.1 — 3 septembre 2026
+
+- **Correctif « Security validation failure » (la vraie cause).** Le script de
+  mise à jour héritait des variables internes de PyInstaller
+  (`_PYI_ARCHIVE_FILE`, `_PYI_PARENT_PROCESS_LEVEL`, `_MEIPASS2`…) et les
+  transmettait à l'exe relancé. Celui-ci se croyait alors processus *enfant*
+  d'un bootloader parent inexistant et refusait de démarrer.
+  L'environnement est maintenant nettoyé avant le lancement du script, et le
+  script les efface également de son côté.
+
 ## v1.3.0 — 3 septembre 2026
 
 - Version de test de la bascule d'exe corrigée en 1.2.9 (aucun changement de
