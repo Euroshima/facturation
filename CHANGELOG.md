@@ -1,5 +1,15 @@
 # Journal des versions
 
+## v1.2.4 — 3 septembre 2026
+
+- Le fichier de la release s'appelle désormais simplement **`Facturation.exe`**
+  (et `Facturation-debug.exe`), sans le numéro de version dans le nom. La
+  version est portée par le tag/titre de la release et affichée dans
+  l'application. Un nom fixe évite qu'un fichier « mente » après une mise à
+  jour (qui remplace le contenu, pas le nom).
+- L'updater ignore explicitement la variante `-debug` et privilégie
+  `Facturation.exe`.
+
 ## v1.2.3 — 3 septembre 2026
 
 - Nettoyage : suppression de l'échafaudage de traçage du démarrage

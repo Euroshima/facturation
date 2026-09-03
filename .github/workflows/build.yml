@@ -69,19 +69,23 @@ jobs:
           (Get-Item "dist/Facturation.exe").Length
           (Get-Item "dist/Facturation-debug.exe").Length
 
-      - name: Rename artifacts
+      # Noms simples et STABLES : Facturation.exe / Facturation-debug.exe.
+      # La version est portée par le tag et le titre de la release, et affichée
+      # dans l'appli. Un nom fixe évite que le fichier « mente » après une
+      # mise à jour automatique (qui remplace le contenu, pas le nom).
+      - name: Prepare artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          Move-Item dist/Facturation.exe out/Facturation-${{ steps.ver.outputs.version }}.exe
-          Move-Item dist/Facturation-debug.exe out/Facturation-debug-${{ steps.ver.outputs.version }}.exe
+          Copy-Item dist/Facturation.exe out/Facturation.exe
+          Copy-Item dist/Facturation-debug.exe out/Facturation-debug.exe
 
       - name: Upload exe to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            out/Facturation-${{ steps.ver.outputs.version }}.exe
-            out/Facturation-debug-${{ steps.ver.outputs.version }}.exe
+            out/Facturation.exe
+            out/Facturation-debug.exe
           tag_name: v${{ steps.ver.outputs.version }}
           name: "Facturation v${{ steps.ver.outputs.version }}"
         env:

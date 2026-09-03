@@ -128,17 +128,27 @@ def _fetch_latest_release() -> dict:
 
 
 def _pick_asset(latest: dict):
-    """Retourne (nom, url_api_asset) du premier asset .exe, ou None.
+    """Retourne (nom, url_api_asset) de l'exe de l'application, ou None.
 
-    On utilise l'URL API de l'asset (`url`) + Accept octet-stream : ça
-    fonctionne aussi bien pour un dépôt public que privé.
+    On ignore la variante « debug » et on privilégie « Facturation.exe ».
+    URL API de l'asset (`url`) + Accept octet-stream : marche dépôt public
+    comme privé.
     """
+    candidates = []
     for a in latest.get("assets") or []:
         name = a.get("name") or ""
         api_url = a.get("url") or ""
-        if name.endswith(ASSET_SUFFIX) and api_url:
+        if not api_url or not name.lower().endswith(ASSET_SUFFIX):
+            continue
+        if "debug" in name.lower():
+            continue
+        candidates.append((name, api_url))
+    if not candidates:
+        return None
+    for name, api_url in candidates:
+        if name.lower() == "facturation.exe":
             return name, api_url
-    return None
+    return candidates[0]
 
 
 def _download(url: str, dest: str):
