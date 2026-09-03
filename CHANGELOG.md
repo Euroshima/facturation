@@ -1,5 +1,10 @@
 # Journal des versions
 
+## v1.2.6 — 3 septembre 2026
+
+- Version de test du signalement de mise à jour (aucun changement fonctionnel
+  par rapport à la 1.2.5).
+
 ## v1.2.5 — 3 septembre 2026
 
 - **Signalement des mises à jour** (sans blocage) : au lancement, une
