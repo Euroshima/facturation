@@ -14,6 +14,7 @@ from core.db import (
     get_conn,
 )
 from pdf.pdfgen import create_pdf
+from .send_email_dialog import show_send_email_dialog, invoice_email_context
 import psycopg2.extras
 from datetime import datetime
 
@@ -117,6 +118,8 @@ class TabCreate(ttk.Frame):
         actions.pack(fill="x", padx=6, pady=6)
         self.btn_save = ttk.Button(actions, text="Générer PDF & Enregistrer (NOUVELLE facture)", command=self.create_invoice)
         self.btn_save.pack(side="right")
+        self.btn_save_send = ttk.Button(actions, text="Générer PDF, Enregistrer & Envoyer par e-mail", command=self.create_invoice_and_email)
+        self.btn_save_send.pack(side="right", padx=6)
         self.btn_update = ttk.Button(actions, text="Enregistrer modifications (facture existante)", command=self.save_edit, state="disabled")
         self.btn_update.pack(side="right", padx=6)
         self.btn_cancel_edit = ttk.Button(actions, text="Annuler édition", command=self.clear_all, state="disabled")
@@ -249,44 +252,75 @@ class TabCreate(ttk.Frame):
         )
 
     # ----------------- Création nouvelle facture -----------------
-    def create_invoice(self):
+    def _form_is_valid(self) -> bool:
         if not (self.controller.var_c_nom.get().strip() or self.controller.var_c_ent.get().strip()):
-            return messagebox.showerror("Client", "Nom ou Entreprise requis pour créer une facture.")
+            messagebox.showerror("Client", "Nom ou Entreprise requis pour créer une facture.")
+            return False
         if not self.items:
-            return messagebox.showerror("Articles", "Ajoute au moins une ligne.")
+            messagebox.showerror("Articles", "Ajoute au moins une ligne.")
+            return False
+        return True
+
+    def _save_new_invoice(self):
+        """Enregistre la facture en base et génère son PDF.
+        Retourne (inv_obj, client_row, pdf_path)."""
+        cid = self._get_current_client_id()
+        facture_num = generate_invoice_number()
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        subtotal, tva_amount, total = self._collect_totals()
+        inv_id = insert_invoice(cid, facture_num, date_str, subtotal, tva_amount, total, self.controller.var_notes.get().strip(), self.items)
+
+        conn = get_conn()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("SELECT * FROM clients WHERE id=%s", (cid,))
+        client_row = cur.fetchone()
+        conn.close()
+
+        pdf_path = invoice_pdf_path(client_row, facture_num)
+
+        inv_obj = {
+            "facture_num": facture_num,
+            "date": date_str,
+            "subtotal": subtotal,
+            "tva": tva_amount,
+            "total": total,
+            "notes": self.controller.var_notes.get().strip(),
+            "tva_rate": float(self.controller.var_tva.get() or 0.0),
+        }
+
+        create_pdf(inv_obj, client_row, self.items, pdf_path)
+        set_pdf_path(inv_id, pdf_path)
+        return inv_obj, client_row, pdf_path
+
+    def create_invoice(self):
+        if not self._form_is_valid():
+            return
         try:
-            cid = self._get_current_client_id()
-            facture_num = generate_invoice_number()
-            date_str = datetime.now().strftime("%Y-%m-%d")
-            subtotal, tva_amount, total = self._collect_totals()
-            inv_id = insert_invoice(cid, facture_num, date_str, subtotal, tva_amount, total, self.controller.var_notes.get().strip(), self.items)
-
-            conn = get_conn()
-            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            cur.execute("SELECT * FROM clients WHERE id=%s", (cid,))
-            client_row = cur.fetchone()
-            conn.close()
-
-            pdf_path = invoice_pdf_path(client_row, facture_num)
-
-            inv_obj = {
-                "facture_num": facture_num,
-                "date": date_str,
-                "subtotal": subtotal,
-                "tva": tva_amount,
-                "total": total,
-                "notes": self.controller.var_notes.get().strip(),
-                "tva_rate": float(self.controller.var_tva.get() or 0.0),
-            }
-
-            create_pdf(inv_obj, client_row, self.items, pdf_path)
-            set_pdf_path(inv_id, pdf_path)
-
-            if messagebox.askyesno("Facture créée", f"Facture {facture_num} enregistrée.\nOuvrir le PDF ?"):
-                self.controller.open_path(pdf_path)
-            self.clear_all()
+            inv_obj, _, pdf_path = self._save_new_invoice()
         except Exception as e:
-            messagebox.showerror("Erreur", f"Impossible de créer la facture :\n{e}")
+            return messagebox.showerror("Erreur", f"Impossible de créer la facture :\n{e}")
+
+        if messagebox.askyesno("Facture créée", f"Facture {inv_obj['facture_num']} enregistrée.\nOuvrir le PDF ?"):
+            self.controller.open_path(pdf_path)
+        self.clear_all()
+
+    def create_invoice_and_email(self):
+        """Génère le PDF, enregistre la facture, puis ouvre la fenêtre d'envoi."""
+        if not self._form_is_valid():
+            return
+        try:
+            inv_obj, client_row, pdf_path = self._save_new_invoice()
+        except Exception as e:
+            return messagebox.showerror("Erreur", f"Impossible de créer la facture :\n{e}")
+
+        show_send_email_dialog(
+            self.winfo_toplevel(),
+            facture_num=inv_obj["facture_num"],
+            to_addr=(client_row or {}).get("email", ""),
+            pdf_path=pdf_path,
+            context=invoice_email_context(inv_obj, client_row),
+        )
+        self.clear_all()
 
     # ----------------- Sauvegarder modifications facture -----------------
     def save_edit(self):

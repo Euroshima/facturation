@@ -1,5 +1,14 @@
 # Journal des versions
 
+## v1.4.0 — 9 septembre 2026
+
+- **Nouveau bouton « Générer PDF, Enregistrer & Envoyer par e-mail »** dans
+  l'onglet Création. En un clic : la facture est enregistrée en base, le PDF
+  est généré, puis la fenêtre d'envoi s'ouvre avec l'e-mail du client, le
+  sujet et le message pré-remplis, PDF déjà en pièce jointe.
+- Le contexte du modèle d'e-mail (facture, client, total, échéance…) est
+  désormais partagé entre les onglets Création et Recherche.
+
 ## v1.3.1 — 3 septembre 2026
 
 - **Correctif « Security validation failure » (la vraie cause).** Le script de

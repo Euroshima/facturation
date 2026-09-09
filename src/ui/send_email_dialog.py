@@ -90,6 +90,30 @@ class SendEmailDialog(tk.Toplevel):
         open_mailto(to, subject, body + note)
 
 
+def invoice_email_context(inv, client) -> dict:
+    """Variables de substitution du modèle d'e-mail pour une facture."""
+    from datetime import timedelta
+    from pdf.pdfgen import _fmt_money, _fmt_date, _parse_date
+
+    client = client or {}
+    cli_name = (client.get("nom_entreprise") or "").strip() or \
+        f"{(client.get('prenom') or '').strip()} {(client.get('nom') or '').strip()}".strip()
+    d = _parse_date(inv.get("date"))
+    try:
+        delai = int(MY_INFO.get("delai_paiement_jours", 30))
+    except (TypeError, ValueError):
+        delai = 30
+    echeance = _fmt_date((d + timedelta(days=delai)).isoformat()) if d else ""
+    return {
+        "facture": inv.get("facture_num", ""),
+        "societe": MY_INFO.get("nom_entreprise") or MY_INFO.get("nom") or "",
+        "client": cli_name,
+        "total": _fmt_money(inv.get("total")),
+        "date": _fmt_date(inv.get("date")),
+        "echeance": echeance,
+    }
+
+
 def show_send_email_dialog(parent, *, facture_num, to_addr, pdf_path, context=None) -> bool:
     dlg = SendEmailDialog(parent, facture_num=facture_num, to_addr=to_addr,
                           pdf_path=pdf_path, context=context)
