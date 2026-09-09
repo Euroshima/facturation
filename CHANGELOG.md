@@ -1,5 +1,15 @@
 # Journal des versions
 
+## v1.6.0 — 9 septembre 2026
+
+- **Sélection du client directement depuis l'onglet Création.** Un champ
+  « Rechercher un client » a été ajouté en haut du bloc Client : tape un nom,
+  un prénom, une entreprise (ou un e-mail / téléphone), une liste de
+  suggestions s'affiche, et le choix remplit d'un coup l'adresse, l'e-mail et
+  le téléphone. Plus besoin de passer par l'onglet Clients.
+- Navigation au clavier : flèche Bas pour entrer dans la liste, Entrée pour
+  valider, Échap pour fermer.
+
 ## v1.5.0 — 9 septembre 2026
 
 - **Nouvel onglet « Paiements »** : suivi des factures réglées ou non.

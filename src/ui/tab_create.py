@@ -11,10 +11,12 @@ from core.db import (
     update_invoice,
     set_pdf_path,
     get_invoice_with_items,
+    search_clients,
     get_conn,
 )
 from pdf.pdfgen import create_pdf
 from .send_email_dialog import show_send_email_dialog, invoice_email_context
+from .widgets import SuggestPopup
 import psycopg2.extras
 from datetime import datetime
 
@@ -36,7 +38,22 @@ class TabCreate(ttk.Frame):
         # Bloc client
         client_fr = ttk.LabelFrame(self, text="Client")
         client_fr.pack(fill="x", padx=6, pady=6)
+
         r = 0
+        ttk.Label(client_fr, text="Rechercher un client").grid(row=r, column=0, sticky="w")
+        self.var_client_lookup = tk.StringVar()
+        self.e_client_lookup = ttk.Entry(client_fr, textvariable=self.var_client_lookup, width=40)
+        self.e_client_lookup.grid(row=r, column=1, columnspan=3, sticky="we", padx=4, pady=2)
+        ttk.Label(client_fr, text="(nom, prénom ou entreprise — les champs se remplissent seuls)",
+                  foreground="#666").grid(row=r, column=4, columnspan=2, sticky="w", padx=4)
+        self._suggest = SuggestPopup(self.e_client_lookup, self._apply_client_suggestion)
+        self._suggest_after = None
+        self.e_client_lookup.bind("<KeyRelease>", self._on_client_lookup_key)
+        self.e_client_lookup.bind("<Down>", lambda e: self._suggest.focus_list())
+        self.e_client_lookup.bind("<Escape>", lambda e: self._suggest.hide())
+        self.e_client_lookup.bind("<FocusOut>", lambda e: self.after(200, self._hide_suggest_if_unfocused))
+
+        r += 1
         ttk.Label(client_fr, text="Prénom").grid(row=r, column=0, sticky="w")
         ttk.Entry(client_fr, textvariable=self.controller.var_c_prenom, width=20).grid(row=r, column=1, padx=4, pady=2)
         ttk.Label(client_fr, text="Nom").grid(row=r, column=2, sticky="w")
@@ -125,6 +142,49 @@ class TabCreate(ttk.Frame):
         self.btn_cancel_edit = ttk.Button(actions, text="Annuler édition", command=self.clear_all, state="disabled")
         self.btn_cancel_edit.pack(side="left")
         ttk.Button(actions, text="Tout effacer", command=self.clear_all).pack(side="left", padx=6)
+
+    # ----------------- Recherche client -----------------
+    def _on_client_lookup_key(self, event):
+        if event.keysym in ("Up", "Down", "Return", "Escape"):
+            return
+        # Frappe rapide : on ne requête la base qu'après une courte pause.
+        if self._suggest_after:
+            self.after_cancel(self._suggest_after)
+        self._suggest_after = self.after(300, self._run_client_lookup)
+
+    def _run_client_lookup(self):
+        self._suggest_after = None
+        term = self.var_client_lookup.get().strip()
+        if len(term) < 2:
+            return self._suggest.hide()
+        try:
+            rows = search_clients(term, limit=10)
+        except Exception:
+            return self._suggest.hide()
+        self._suggest.show([(self._client_label(r), r) for r in rows])
+
+    @staticmethod
+    def _client_label(row):
+        nom = f"{(row.get('prenom') or '').strip()} {(row.get('nom') or '').strip()}".strip()
+        ent = (row.get("nom_entreprise") or "").strip()
+        contact = (row.get("email") or "").strip() or (row.get("telephone") or "").strip()
+        label = " — ".join(p for p in (ent, nom) if p) or "(client sans nom)"
+        return f"{label} · {contact}" if contact else label
+
+    def _apply_client_suggestion(self, row):
+        self.controller.var_c_prenom.set(row.get("prenom") or "")
+        self.controller.var_c_nom.set(row.get("nom") or "")
+        self.controller.var_c_ent.set(row.get("nom_entreprise") or "")
+        self.controller.var_c_addr.set(row.get("adresse") or "")
+        self.controller.var_c_email.set(row.get("email") or "")
+        self.controller.var_c_tel.set(row.get("telephone") or "")
+        self.var_client_lookup.set(self._client_label(row))
+        self.e_client_lookup.focus_set()
+
+    def _hide_suggest_if_unfocused(self):
+        """Ferme la liste sauf si le focus vient d'y passer (clic sur une ligne)."""
+        if self.focus_get() is not self._suggest.listbox:
+            self._suggest.hide()
 
     # ----------------- Gestion articles -----------------
     def add_item(self):
@@ -418,6 +478,8 @@ class TabCreate(ttk.Frame):
         self.controller.var_c_tel.set("")
         self.controller.var_tva.set("0")
         self.controller.var_notes.set("")
+        self.var_client_lookup.set("")
+        self._suggest.hide()
 
         self.var_i_desc.set("")
         self.var_i_qty.set("1")

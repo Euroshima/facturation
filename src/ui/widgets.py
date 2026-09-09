@@ -62,40 +62,64 @@ def make_sortable(tree, numeric_columns=None):
 
 
 class SuggestPopup(tk.Toplevel):
-    """Popup simple d’autocomplétion pour Entry."""
+    """Popup simple d’autocomplétion pour Entry.
+
+    `show()` accepte soit des libellés simples, soit des couples
+    (libellé, valeur) : `on_select` reçoit alors la valeur associée, ce qui
+    évite d'avoir à retrouver l'élément d'origine à partir du texte affiché.
+    """
     def __init__(self, parent_entry, on_select):
         super().__init__(parent_entry)
         self.withdraw()
         self.overrideredirect(True)
-        self.listbox = tk.Listbox(self, height=8)
+        self.listbox = tk.Listbox(self, height=8, activestyle="none")
         self.listbox.pack(fill="both", expand=True)
         self.parent_entry = parent_entry
         self.on_select = on_select
-        self.listbox.bind("<Double-1>", self._choose)
+        self._values = []
+        self.listbox.bind("<ButtonRelease-1>", self._choose)
         self.listbox.bind("<Return>", self._choose)
-        self.listbox.bind("<Escape>", lambda e: self.hide())
+        self.listbox.bind("<Escape>", lambda e: self._back_to_entry())
 
     def show(self, items):
+        items = [it if isinstance(it, (tuple, list)) else (it, it) for it in items]
+        self._values = [v for _, v in items]
         self.listbox.delete(0, tk.END)
-        for t in items:
-            self.listbox.insert(tk.END, t)
+        for label, _ in items:
+            self.listbox.insert(tk.END, label)
         if not items:
             return self.hide()
         x = self.parent_entry.winfo_rootx()
         y = self.parent_entry.winfo_rooty() + self.parent_entry.winfo_height()
         w = self.parent_entry.winfo_width()
-        self.geometry(f"{w}x160+{x}+{y}")
+        h = min(len(items), 8) * 20 + 4
+        self.geometry(f"{w}x{h}+{x}+{y}")
         self.deiconify()
         self.lift()
         self.listbox.selection_clear(0, tk.END)
         if self.listbox.size():
             self.listbox.selection_set(0)
 
+    @property
+    def visible(self):
+        return self.winfo_ismapped()
+
+    def focus_list(self):
+        """Donne le focus à la liste (flèche Bas depuis le champ)."""
+        if self.visible and self.listbox.size():
+            self.listbox.focus_set()
+            if not self.listbox.curselection():
+                self.listbox.selection_set(0)
+
     def hide(self):
         self.withdraw()
+
+    def _back_to_entry(self):
+        self.hide()
+        self.parent_entry.focus_set()
 
     def _choose(self, *_):
         sel = self.listbox.curselection()
         if sel:
-            self.on_select(self.listbox.get(sel[0]))
+            self.on_select(self._values[sel[0]])
         self.hide()
