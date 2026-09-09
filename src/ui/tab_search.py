@@ -12,8 +12,15 @@ class TabSearch(ttk.Frame):
     def __init__(self, master, controller):
         super().__init__(master)
         self.controller = controller
+        self._loaded = False
         self._build_ui()
-        self._do_search()  # la liste complète s'affiche sans avoir à cliquer
+
+    def on_show(self):
+        """Appelé quand l'onglet devient visible : la liste s'affiche sans
+        avoir à cliquer, mais la base n'est interrogée qu'à la première venue."""
+        if not self._loaded:
+            self._loaded = True
+            self._do_search()
 
     def _build_ui(self):
         st = ttk.Frame(self)

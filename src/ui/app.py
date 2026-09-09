@@ -89,7 +89,9 @@ class App(ttk.Frame):
         self.tab_clients = TabClients(nb, controller=self)
         nb.add(self.tab_clients, text="Clients")
 
-        # La liste des impayés doit refléter les factures créées entre-temps.
+        # Chaque onglet charge ses données quand il devient visible : au
+        # démarrage, seul « Créer » est affiché, inutile d'interroger la base
+        # pour les trois autres.
         nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # Vérification NON bloquante : on ne fait que *signaler* si une version
@@ -101,10 +103,12 @@ class App(ttk.Frame):
 
     def _on_tab_changed(self, event):
         try:
-            if event.widget.nametowidget(event.widget.select()) is self.tab_payments:
-                self.tab_payments.refresh()
+            tab = event.widget.nametowidget(event.widget.select())
         except Exception:
-            pass
+            return
+        on_show = getattr(tab, "on_show", None)
+        if on_show:
+            on_show()
 
     # -------- mise à jour : signalement --------
     def _notify_update_available(self, version):

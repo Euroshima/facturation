@@ -1,5 +1,25 @@
 # Journal des versions
 
+## v1.7.2 — 9 septembre 2026
+
+Audit complet des lenteurs restantes. Avec une base distante, chaque
+aller-retour réseau coûte environ 100 ms : la rapidité d'une action dépend donc
+surtout du **nombre de requêtes** qu'elle envoie. Elles ont été réduites partout.
+
+- **Création et modification de facture** : les lignes d'articles partaient une
+  par une (23 lignes = 23 allers-retours). Elles sont maintenant envoyées
+  ensemble — de ~1,5 s à ~0,07 s pour une facture de 23 lignes.
+- **Reconnaissance du client** : les trois recherches successives (e-mail, puis
+  téléphone, puis identité) sont fusionnées en une seule requête, à priorité
+  identique.
+- **Ouvrir, régénérer ou envoyer une facture** : 4 requêtes → 2 (facture et
+  client lus ensemble, et le chemin du PDF n'est réécrit que s'il a changé).
+- **Démarrage** : le test de connexion réutilise la connexion de
+  l'application au lieu d'en ouvrir une jetable (~0,5 s économisées), et la
+  création des tables se fait en un seul envoi (6 requêtes → 3).
+- **Onglets** : chaque onglet n'interroge la base qu'en devenant visible. Au
+  lancement, seul « Créer / Éditer facture » est chargé, au lieu des quatre.
+
 ## v1.7.1 — 9 septembre 2026
 
 - **Correctif de lenteur : l'application ouvrait une connexion neuve à la base

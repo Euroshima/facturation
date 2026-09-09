@@ -176,6 +176,8 @@ def dedupe_clients():
 def init_db():
     conn = get_conn()
     with conn.cursor() as c:
+        # Tout le schéma part en un seul aller-retour : exécuté à chaque
+        # démarrage, il coûtait autant de latences réseau que d'instructions.
         c.execute("""
             CREATE TABLE IF NOT EXISTS clients(
                 id SERIAL PRIMARY KEY,
@@ -185,9 +187,7 @@ def init_db():
                 adresse TEXT,
                 email TEXT,
                 telephone TEXT
-            )
-        """)
-        c.execute("""
+            );
             CREATE TABLE IF NOT EXISTS invoices(
                 id SERIAL PRIMARY KEY,
                 facture_num TEXT UNIQUE,
@@ -198,9 +198,7 @@ def init_db():
                 total REAL,
                 pdf_path TEXT,
                 notes TEXT
-            )
-        """)
-        c.execute("""
+            );
             CREATE TABLE IF NOT EXISTS items(
                 id SERIAL PRIMARY KEY,
                 invoice_id INTEGER REFERENCES invoices(id),
@@ -209,12 +207,11 @@ def init_db():
                 unit VARCHAR(10) DEFAULT 'kg',
                 price REAL,
                 total REAL
-            )
+            );
+            -- Suivi des règlements : NULL = facture non payée, sinon date du
+            -- paiement. Ajouté après coup, d'où la migration en place.
+            ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at TEXT;
         """)
-        # Suivi des règlements : NULL = facture non payée, sinon date du paiement.
-        # Ajouté après coup, d'où la migration en place plutôt qu'un champ de la
-        # définition de table (les bases existantes doivent l'obtenir aussi).
-        c.execute("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at TEXT")
         conn.commit()
 
     _dedupe_clients_core(conn)
@@ -325,35 +322,26 @@ def find_or_create_client(prenom, nom, entreprise, adresse, email, tel):
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:
-            cid = None
-            if email_n:
-                c.execute("""
-                    SELECT id FROM clients
-                    WHERE lower(trim(coalesce(email,''))) = %s
-                    LIMIT 1
-                """, (email_n,))
-                r = c.fetchone()
-                if r: cid = r["id"]
-
-            if cid is None and tel_n:
-                c.execute("""
-                    SELECT id FROM clients
-                    WHERE regexp_replace(coalesce(telephone,''), E'\\D+', '', 'g') = %s
-                    LIMIT 1
-                """, (tel_n,))
-                r = c.fetchone()
-                if r: cid = r["id"]
-
-            if cid is None:
-                c.execute("""
-                    SELECT id FROM clients
-                    WHERE lower(trim(coalesce(prenom,''))) = %s
-                      AND lower(trim(coalesce(nom,''))) = %s
-                      AND lower(trim(coalesce(nom_entreprise,''))) = %s
-                    LIMIT 1
-                """, (prenom_n, nom_n, ent_n))
-                r = c.fetchone()
-                if r: cid = r["id"]
+            # Les trois pistes (e-mail, puis téléphone, puis identité) sont
+            # cherchées en une seule requête : le CASE reproduit l'ordre de
+            # priorité qu'avaient les recherches successives.
+            c.execute("""
+                SELECT id FROM clients
+                WHERE (%(email)s <> '' AND lower(trim(coalesce(email,''))) = %(email)s)
+                   OR (%(tel)s <> '' AND regexp_replace(coalesce(telephone,''), E'\\D+', '', 'g') = %(tel)s)
+                   OR (lower(trim(coalesce(prenom,''))) = %(prenom)s
+                       AND lower(trim(coalesce(nom,''))) = %(nom)s
+                       AND lower(trim(coalesce(nom_entreprise,''))) = %(ent)s)
+                ORDER BY CASE
+                    WHEN %(email)s <> '' AND lower(trim(coalesce(email,''))) = %(email)s THEN 1
+                    WHEN %(tel)s <> '' AND regexp_replace(coalesce(telephone,''), E'\\D+', '', 'g') = %(tel)s THEN 2
+                    ELSE 3
+                END, id
+                LIMIT 1
+            """, {"email": email_n, "tel": tel_n, "prenom": prenom_n,
+                  "nom": nom_n, "ent": ent_n})
+            r = c.fetchone()
+            cid = r["id"] if r else None
 
             if cid is not None:
                 c.execute("""
@@ -404,6 +392,21 @@ def search_clients(term, limit=50):
         conn.close()
 
 # ---------- Factures ----------
+def _insert_items(cur, invoice_id, items):
+    """Insère toutes les lignes en un seul aller-retour.
+
+    Une facture de 20 lignes coûtait 20 requêtes, soit autant de latences
+    réseau bout à bout avec une base distante."""
+    if not items:
+        return
+    psycopg2.extras.execute_values(
+        cur,
+        "INSERT INTO items (invoice_id, description, qty, unit, price, total) VALUES %s",
+        [(invoice_id, it["description"], it["qty"], it.get("unit", "kg"),
+          it["price"], it["total"]) for it in items],
+    )
+
+
 def generate_invoice_number():
     today = datetime.now().strftime("%Y%m%d")
     conn = get_conn()
@@ -425,11 +428,7 @@ def insert_invoice(client_id, facture_num, date, subtotal, tva, total, notes, it
                 RETURNING id
             """, (facture_num, client_id, date, subtotal, tva, total, notes))
             invoice_id = c.fetchone()[0]
-            for it in items:
-                c.execute("""
-                    INSERT INTO items (invoice_id, description, qty, unit, price, total)
-                    VALUES (%s,%s,%s,%s,%s,%s)
-                """, (invoice_id, it["description"], it["qty"], it.get("unit","kg"), it["price"], it["total"]))
+            _insert_items(c, invoice_id, items)
             conn.commit()
             return invoice_id
     finally:
@@ -463,18 +462,7 @@ def update_invoice(invoice_id, client_id=None, date=None, subtotal=None, tva=Non
             if items is not None:
                 # Supprime les anciens
                 c.execute("DELETE FROM items WHERE invoice_id=%s", (invoice_id,))
-                for it in items:
-                    c.execute("""
-                        INSERT INTO items (invoice_id, description, qty, unit, price, total)
-                        VALUES (%s,%s,%s,%s,%s,%s)
-                    """, (
-                        invoice_id,
-                        it["description"],
-                        it["qty"],
-                        it.get("unit", "kg"),
-                        it["price"],
-                        it["total"]
-                    ))
+                _insert_items(c, invoice_id, items)
             conn.commit()
             return invoice_id
     finally:
@@ -505,15 +493,31 @@ def get_invoice_with_items(invoice_id):
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:
-            c.execute("SELECT * FROM invoices WHERE id=%s", (invoice_id,))
-            inv = c.fetchone()
-            if not inv:
+            # Facture et client en une seule requête (les colonnes du client
+            # sont préfixées pour ne pas écraser celles de la facture).
+            c.execute("""
+                SELECT invoices.*,
+                       clients.id AS c_id, clients.prenom AS c_prenom,
+                       clients.nom AS c_nom, clients.nom_entreprise AS c_nom_entreprise,
+                       clients.adresse AS c_adresse, clients.email AS c_email,
+                       clients.telephone AS c_telephone
+                FROM invoices
+                LEFT JOIN clients ON clients.id = invoices.client_id
+                WHERE invoices.id = %s
+            """, (invoice_id,))
+            row = c.fetchone()
+            if not row:
                 # Pas de print() : en mode --noconsole, sys.stdout vaut None.
                 _console(f"Aucune facture trouvée pour id={invoice_id}")
                 return None, None, []
 
-            c.execute("SELECT * FROM clients WHERE id=%s", (inv["client_id"],))
-            client = c.fetchone()
+            inv = {k: v for k, v in dict(row).items() if not k.startswith("c_")}
+            client = None
+            if row["c_id"] is not None:
+                client = {"id": row["c_id"], "prenom": row["c_prenom"],
+                          "nom": row["c_nom"], "nom_entreprise": row["c_nom_entreprise"],
+                          "adresse": row["c_adresse"], "email": row["c_email"],
+                          "telephone": row["c_telephone"]}
 
             c.execute("SELECT * FROM items WHERE invoice_id=%s", (invoice_id,))
             items = c.fetchall()

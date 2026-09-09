@@ -174,13 +174,20 @@ def _improve_windows_ui():
 
 
 def _db_reachable():
-    """(ok, message)."""
+    """(ok, message). Ouvre la connexion partagée : elle servira ensuite à
+    toute l'application, au lieu d'en établir une jetable juste pour le test
+    (une connexion coûte ~0,5 s avec une base distante)."""
     try:
-        from core.db import try_connect
-        from core.dbconfig import database_url
-        return try_connect(database_url())
+        from core.db import get_conn
+        conn = get_conn()
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT 1")
+        finally:
+            conn.close()
+        return True, ""
     except Exception as e:
-        return False, str(e)
+        return False, str(e).strip()
 
 
 def _ensure_db_configured(root):

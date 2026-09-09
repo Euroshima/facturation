@@ -29,6 +29,9 @@ class TabPayments(ttk.Frame):
         super().__init__(master)
         self.controller = controller
         self._build_ui()
+
+    def on_show(self):
+        # Toujours rafraîchi : de nouvelles factures ont pu être créées.
         self.refresh()
 
     def _build_ui(self):

@@ -9,8 +9,13 @@ class TabClients(ttk.Frame):
     def __init__(self, master, controller):
         super().__init__(master)
         self.controller = controller
+        self._loaded = False
         self._build_ui()
-        self._do_search()  # la liste s'affiche sans avoir à cliquer
+
+    def on_show(self):
+        if not self._loaded:
+            self._loaded = True
+            self._do_search()
 
     def _build_ui(self):
         ct = ttk.Frame(self)

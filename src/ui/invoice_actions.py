@@ -28,5 +28,8 @@ def regenerate_pdf(invoice_id):
         "tva_rate": tva_rate,
     }
     create_pdf(inv_obj, client, items_dict, pdf_path)
-    set_pdf_path(invoice_id, pdf_path)
+    # Le chemin ne change que si le client a été renommé : inutile de payer un
+    # aller-retour supplémentaire à chaque régénération.
+    if inv.get("pdf_path") != pdf_path:
+        set_pdf_path(invoice_id, pdf_path)
     return pdf_path, inv, client
