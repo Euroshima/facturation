@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from core.settings import CURRENCY, MY_INFO
-from core.db import list_invoices_by_payment, mark_invoice_paid, mark_invoice_unpaid
+from core.db import list_invoices_by_payment, mark_invoices_paid, mark_invoices_unpaid
 from pdf.pdfgen import _parse_date, _fmt_date
 from .widgets import make_sortable
 from .invoice_actions import regenerate_pdf
@@ -128,8 +128,7 @@ class TabPayments(ttk.Frame):
         if not ids:
             return
         try:
-            for inv_id in ids:
-                mark_invoice_paid(inv_id)
+            mark_invoices_paid(ids)
         except Exception as e:
             return messagebox.showerror("Paiements", f"Échec de l'enregistrement :\n{e}")
         self.refresh()
@@ -160,8 +159,7 @@ class TabPayments(ttk.Frame):
         if not ids:
             return
         try:
-            for inv_id in ids:
-                mark_invoice_unpaid(inv_id)
+            mark_invoices_unpaid(ids)
         except Exception as e:
             return messagebox.showerror("Paiements", f"Échec de l'enregistrement :\n{e}")
         self.refresh()

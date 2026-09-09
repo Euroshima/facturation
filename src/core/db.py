@@ -1,7 +1,9 @@
 # core/db.py
 import re
 import sys
+import time
 import psycopg2
+import psycopg2.extensions
 import psycopg2.extras
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -22,11 +24,83 @@ def _console(msg: str):
 # ---------- Connexion ----------
 # Les identifiants ne sont plus dans le code : voir core/dbconfig.py
 # (fichier de config écrit par l'app, ou variables d'environnement DB_*).
+#
+# La connexion est réutilisée d'un appel à l'autre : avec une base distante,
+# l'établissement d'une connexion (TCP + TLS + authentification) coûte ~450 ms,
+# contre ~60 ms pour une requête. Ouvrir puis fermer à chaque appel rendait la
+# moindre action perceptiblement lente.
+
+_SHARED = {"conn": None, "url": None, "last_used": 0.0}
+
+# Au-delà de ce temps d'inactivité, on vérifie que la connexion est toujours
+# vivante avant de la réutiliser (le serveur ou le réseau peut l'avoir coupée).
+_VALIDATE_AFTER_S = 30.0
+
+
+def _drop_shared():
+    conn = _SHARED["conn"]
+    _SHARED["conn"] = None
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _is_alive(conn):
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
+class _SharedConnection:
+    """Connexion partagée : `close()` la rend au lieu de la fermer.
+
+    Les appelants gardent leur `try/finally: conn.close()` habituel ; on se
+    contente de laisser la session propre pour le suivant."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def close(self):
+        try:
+            status = self._conn.get_transaction_status()
+            if status != psycopg2.extensions.TRANSACTION_STATUS_IDLE:
+                # Transaction laissée ouverte ou en erreur : sans ce rollback,
+                # le prochain emprunteur hériterait d'une session inutilisable.
+                self._conn.rollback()
+        except Exception:
+            _drop_shared()
+
 
 def get_conn():
-    """Ouvre une connexion. Relit la config à chaque appel : une modification
-    dans les paramètres est prise en compte sans redémarrer."""
-    return psycopg2.connect(database_url())
+    """Rend la connexion partagée, en la (r)ouvrant si nécessaire. La config
+    est relue à chaque appel : la changer dans les paramètres reconnecte."""
+    url = database_url()
+    conn = _SHARED["conn"]
+
+    if conn is not None and (conn.closed or _SHARED["url"] != url):
+        _drop_shared()
+        conn = None
+
+    if conn is not None and (time.monotonic() - _SHARED["last_used"]) > _VALIDATE_AFTER_S \
+            and not _is_alive(conn):
+        _drop_shared()
+        conn = None
+
+    if conn is None:
+        conn = psycopg2.connect(url)
+        _SHARED["conn"] = conn
+        _SHARED["url"] = url
+
+    _SHARED["last_used"] = time.monotonic()
+    return _SharedConnection(conn)
 
 
 def try_connect(url: str):
@@ -468,23 +542,30 @@ def list_invoices_by_payment(include_paid=False):
         conn.close()
 
 
-def mark_invoice_paid(invoice_id, paid_at=None):
-    """Marque la facture réglée. `paid_at` par défaut : aujourd'hui."""
+def mark_invoices_paid(invoice_ids, paid_at=None):
+    """Marque des factures réglées en un seul aller-retour.
+    `paid_at` par défaut : aujourd'hui."""
+    ids = [int(i) for i in invoice_ids]
+    if not ids:
+        return
     paid_at = paid_at or datetime.now().strftime("%Y-%m-%d")
     conn = get_conn()
     try:
         with conn.cursor() as c:
-            c.execute("UPDATE invoices SET paid_at=%s WHERE id=%s", (paid_at, invoice_id))
+            c.execute("UPDATE invoices SET paid_at=%s WHERE id = ANY(%s)", (paid_at, ids))
             conn.commit()
     finally:
         conn.close()
 
 
-def mark_invoice_unpaid(invoice_id):
+def mark_invoices_unpaid(invoice_ids):
+    ids = [int(i) for i in invoice_ids]
+    if not ids:
+        return
     conn = get_conn()
     try:
         with conn.cursor() as c:
-            c.execute("UPDATE invoices SET paid_at=NULL WHERE id=%s", (invoice_id,))
+            c.execute("UPDATE invoices SET paid_at=NULL WHERE id = ANY(%s)", (ids,))
             conn.commit()
     finally:
         conn.close()

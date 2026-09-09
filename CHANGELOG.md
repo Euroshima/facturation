@@ -1,5 +1,20 @@
 # Journal des versions
 
+## v1.7.1 — 9 septembre 2026
+
+- **Correctif de lenteur : l'application ouvrait une connexion neuve à la base
+  à chaque action.** Avec la base sur un serveur distant, établir une connexion
+  (réseau + chiffrement + authentification) coûte environ 450 ms, contre 60 ms
+  pour la requête elle-même. La connexion est désormais réutilisée d'une action
+  à l'autre, et rouverte automatiquement si le serveur l'a coupée ou si les
+  paramètres de connexion changent.
+- **Marquage des paiements groupé** : marquer plusieurs factures payées se fait
+  en un seul aller-retour au lieu d'un par facture.
+- Effet mesuré sur l'onglet Paiements : marquer une facture passe de ~1,5 s à
+  ~0,35 s ; en marquer cinq, de ~4,5 s à ~0,38 s (le temps ne dépend plus du
+  nombre de factures sélectionnées). Toute l'application en profite :
+  recherches, listes et chargement de facture sont environ 3 fois plus rapides.
+
 ## v1.7.0 — 9 septembre 2026
 
 - **Les listes s'affichent toutes seules.** Les onglets Rechercher et Clients
