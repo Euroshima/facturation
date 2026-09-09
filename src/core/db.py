@@ -137,6 +137,10 @@ def init_db():
                 total REAL
             )
         """)
+        # Suivi des règlements : NULL = facture non payée, sinon date du paiement.
+        # Ajouté après coup, d'où la migration en place plutôt qu'un champ de la
+        # définition de table (les bases existantes doivent l'obtenir aussi).
+        c.execute("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at TEXT")
         conn.commit()
 
     _dedupe_clients_core(conn)
@@ -399,6 +403,47 @@ def get_invoice_with_items(invoice_id):
             items = c.fetchall()
 
             return inv, client, items
+    finally:
+        conn.close()
+
+
+# ---------- Paiements ----------
+def list_invoices_by_payment(include_paid=False):
+    """Factures avec leur client, non payées d'abord (les plus anciennes en tête).
+    `include_paid` ajoute les factures déjà réglées."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:
+            c.execute("""
+                SELECT invoices.*, clients.prenom, clients.nom, clients.nom_entreprise
+                FROM invoices
+                LEFT JOIN clients ON invoices.client_id = clients.id
+                WHERE %s OR invoices.paid_at IS NULL
+                ORDER BY invoices.paid_at IS NOT NULL, invoices.date ASC, invoices.id ASC
+            """, (bool(include_paid),))
+            return c.fetchall()
+    finally:
+        conn.close()
+
+
+def mark_invoice_paid(invoice_id, paid_at=None):
+    """Marque la facture réglée. `paid_at` par défaut : aujourd'hui."""
+    paid_at = paid_at or datetime.now().strftime("%Y-%m-%d")
+    conn = get_conn()
+    try:
+        with conn.cursor() as c:
+            c.execute("UPDATE invoices SET paid_at=%s WHERE id=%s", (paid_at, invoice_id))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def mark_invoice_unpaid(invoice_id):
+    conn = get_conn()
+    try:
+        with conn.cursor() as c:
+            c.execute("UPDATE invoices SET paid_at=NULL WHERE id=%s", (invoice_id,))
+            conn.commit()
     finally:
         conn.close()
 

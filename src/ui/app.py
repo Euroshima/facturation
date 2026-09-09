@@ -11,6 +11,7 @@ from core.changelog import load_changelog
 
 from .tab_create import TabCreate
 from .tab_search import TabSearch
+from .tab_payments import TabPayments
 from .tab_clients import TabClients
 from .db_config_dialog import show_db_config_dialog
 from .company_dialog import show_company_dialog
@@ -82,8 +83,14 @@ class App(ttk.Frame):
         self.tab_search = TabSearch(nb, controller=self)
         nb.add(self.tab_search, text="Rechercher factures")
 
+        self.tab_payments = TabPayments(nb, controller=self)
+        nb.add(self.tab_payments, text="Paiements")
+
         self.tab_clients = TabClients(nb, controller=self)
         nb.add(self.tab_clients, text="Clients")
+
+        # La liste des impayés doit refléter les factures créées entre-temps.
+        nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # Vérification NON bloquante : on ne fait que *signaler* si une version
         # plus récente existe (indicateur + petit pop-up). Le remplacement
@@ -91,6 +98,13 @@ class App(ttk.Frame):
         check_for_update_async(
             lambda v: self.after(0, lambda: self._notify_update_available(v))
         )
+
+    def _on_tab_changed(self, event):
+        try:
+            if event.widget.nametowidget(event.widget.select()) is self.tab_payments:
+                self.tab_payments.refresh()
+        except Exception:
+            pass
 
     # -------- mise à jour : signalement --------
     def _notify_update_available(self, version):

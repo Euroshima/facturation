@@ -1,5 +1,21 @@
 # Journal des versions
 
+## v1.5.0 — 9 septembre 2026
+
+- **Nouvel onglet « Paiements »** : suivi des factures réglées ou non.
+  Les impayées sont listées en premier, de la plus ancienne à la plus
+  récente, avec leur échéance et leur retard en jours. Les factures dont
+  l'échéance est dépassée s'affichent en rouge.
+- **Marquage rapide** : bouton « Marquer payée » (ou double-clic sur la
+  ligne) qui enregistre la date du jour. La sélection multiple permet de
+  régler plusieurs factures d'un coup. « Marquer non payée » corrige une
+  erreur, et la case « Afficher aussi les payées » permet de les retrouver.
+- Total des impayés (nombre de factures et montant) affiché en bas de
+  l'onglet.
+- La colonne `paid_at` est ajoutée automatiquement à la base existante au
+  premier lancement ; les factures déjà enregistrées apparaissent comme non
+  payées.
+
 ## v1.4.0 — 9 septembre 2026
 
 - **Nouveau bouton « Générer PDF, Enregistrer & Envoyer par e-mail »** dans
