@@ -1,5 +1,30 @@
 # Journal des versions
 
+## v1.7.0 — 9 septembre 2026
+
+- **Les listes s'affichent toutes seules.** Les onglets Rechercher et Clients
+  chargent leur contenu à l'ouverture, sans avoir à cliquer « Rechercher », et
+  la touche Entrée lance la recherche depuis le champ de saisie.
+- **Correctif : impossible d'effacer un champ client.** Vider l'e-mail ou
+  l'adresse dans « Modifier client » n'avait aucun effet, l'ancienne valeur
+  revenait silencieusement. L'édition écrit désormais la fiche telle quelle.
+  (La complétion automatique lors de la création d'une facture, elle, continue
+  de ne jamais effacer une information existante.)
+- **Suppression de factures et de clients.** Bouton « Supprimer » dans les
+  onglets Rechercher et Clients, avec confirmation. Un client encore rattaché
+  à des factures ne peut pas être supprimé ; le PDF d'une facture supprimée
+  reste sur le disque.
+- **Votre société n'est plus enregistrée comme cliente.** Elle était recréée
+  dans la liste des clients à chaque démarrage et polluait la recherche. Si
+  elle s'y trouve déjà, vous pouvez maintenant la supprimer.
+- **« Garder le client après création »** (coché par défaut) : le bloc client
+  reste rempli après avoir généré une facture, pour en enchaîner plusieurs sur
+  le même client.
+- **Relance depuis l'onglet Paiements.** Bouton « Relancer par e-mail » avec un
+  modèle dédié, distinct de l'envoi de facture, et un nouveau champ `{retard}`
+  (jours de retard). Les deux modèles s'éditent dans Paramètres → Modèle
+  d'e-mail.
+
 ## v1.6.0 — 9 septembre 2026
 
 - **Sélection du client directement depuis l'onglet Création.** Un champ

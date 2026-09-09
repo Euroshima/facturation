@@ -10,18 +10,20 @@ from .dialog_util import make_visible
 
 
 class SendEmailDialog(tk.Toplevel):
-    def __init__(self, parent, *, facture_num, to_addr, pdf_path, context=None):
+    def __init__(self, parent, *, facture_num, to_addr, pdf_path, context=None,
+                 template="facture"):
         super().__init__(parent)
         self.sent = False
         self._pdf = pdf_path
-        self.title(f"Envoyer la facture {facture_num}")
+        titre = "Relancer la facture" if template == "relance" else "Envoyer la facture"
+        self.title(f"{titre} {facture_num}")
         self.resizable(False, False)
 
         societe = MY_INFO.get("nom_entreprise") or MY_INFO.get("nom") or ""
         ctx = {"facture": facture_num, "societe": societe, "client": "",
-               "total": "", "date": "", "echeance": ""}
+               "total": "", "date": "", "echeance": "", "retard": "0"}
         ctx.update(context or {})
-        tpl_subject, tpl_body = load_template()
+        tpl_subject, tpl_body = load_template(template)
         default_subject = render(tpl_subject, ctx)
         default_body = render(tpl_body, ctx)
 
@@ -92,6 +94,7 @@ class SendEmailDialog(tk.Toplevel):
 
 def invoice_email_context(inv, client) -> dict:
     """Variables de substitution du modèle d'e-mail pour une facture."""
+    import datetime
     from datetime import timedelta
     from pdf.pdfgen import _fmt_money, _fmt_date, _parse_date
 
@@ -103,19 +106,24 @@ def invoice_email_context(inv, client) -> dict:
         delai = int(MY_INFO.get("delai_paiement_jours", 30))
     except (TypeError, ValueError):
         delai = 30
-    echeance = _fmt_date((d + timedelta(days=delai)).isoformat()) if d else ""
+    ech = (d + timedelta(days=delai)) if d else None
+    retard = 0
+    if ech and not inv.get("paid_at"):
+        retard = max(0, (datetime.date.today() - ech).days)
     return {
         "facture": inv.get("facture_num", ""),
         "societe": MY_INFO.get("nom_entreprise") or MY_INFO.get("nom") or "",
         "client": cli_name,
         "total": _fmt_money(inv.get("total")),
         "date": _fmt_date(inv.get("date")),
-        "echeance": echeance,
+        "echeance": _fmt_date(ech.isoformat()) if ech else "",
+        "retard": str(retard),
     }
 
 
-def show_send_email_dialog(parent, *, facture_num, to_addr, pdf_path, context=None) -> bool:
+def show_send_email_dialog(parent, *, facture_num, to_addr, pdf_path, context=None,
+                           template="facture") -> bool:
     dlg = SendEmailDialog(parent, facture_num=facture_num, to_addr=to_addr,
-                          pdf_path=pdf_path, context=context)
+                          pdf_path=pdf_path, context=context, template=template)
     dlg.wait_window()
     return dlg.sent

@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from core.db import search_clients, get_conn, update_client
+from core.db import search_clients, get_conn, update_client, delete_client
 from .widgets import make_sortable
 import psycopg2
 import psycopg2.extras
@@ -10,16 +10,20 @@ class TabClients(ttk.Frame):
         super().__init__(master)
         self.controller = controller
         self._build_ui()
+        self._do_search()  # la liste s'affiche sans avoir à cliquer
 
     def _build_ui(self):
         ct = ttk.Frame(self)
         ct.pack(fill="x", padx=6, pady=6)
 
         self.var_client_search = tk.StringVar()
-        ttk.Entry(ct, textvariable=self.var_client_search, width=40).pack(side="left", padx=4)
+        e_search = ttk.Entry(ct, textvariable=self.var_client_search, width=40)
+        e_search.pack(side="left", padx=4)
+        e_search.bind("<Return>", lambda e: self._do_search())
         ttk.Button(ct, text="Rechercher", command=self._do_search).pack(side="left")
         ttk.Button(ct, text="Charger dans création", command=self._load_selected_into_form).pack(side="left", padx=6)
         ttk.Button(ct, text="Éditer la sélection", command=self._edit_selected_client).pack(side="left", padx=6)
+        ttk.Button(ct, text="Supprimer", command=self._delete_selected_client).pack(side="left")
 
         self.tree = ttk.Treeview(self, columns=("id","prenom","nom","entreprise","email","telephone"), show="headings", height=14)
         for col, title, w, anchor in [
@@ -76,6 +80,25 @@ class TabClients(ttk.Frame):
         c.var_c_email.set(r["email"] or "")
         c.var_c_tel.set(r["telephone"] or "")
         messagebox.showinfo("Client", "Client chargé dans l’onglet Création.")
+
+    # ---- Suppression ----
+    def _delete_selected_client(self):
+        sel = self.tree.selection()
+        if not sel:
+            return messagebox.showinfo("Client", "Sélectionne un client à supprimer.")
+        vals = self.tree.item(sel[0], "values")
+        cid, label = vals[0], (vals[3] or f"{vals[1]} {vals[2]}").strip()
+        if not messagebox.askyesno("Supprimer le client",
+                                   f"Supprimer définitivement « {label} » ?",
+                                   icon="warning"):
+            return
+        try:
+            delete_client(cid)
+        except ValueError as e:
+            return messagebox.showwarning("Client", str(e))
+        except Exception as e:
+            return messagebox.showerror("Client", f"Échec :\n{e}")
+        self._do_search()
 
     # ---- Clic droit ----
     def _on_right_click(self, event):

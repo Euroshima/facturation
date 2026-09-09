@@ -165,24 +165,6 @@ def ensure_dirs():
     os.makedirs(PDF_FOLDER, exist_ok=True)
 
 
-def ensure_my_info_in_db():
-    from core.settings import MY_INFO
-    from core.db import find_or_create_client
-
-    full_name = (MY_INFO.get("nom") or "").strip()
-    parts = full_name.split()
-    prenom = parts[0] if parts else ""
-    nom = parts[-1] if parts else ""
-    find_or_create_client(
-        prenom=prenom,
-        nom=nom,
-        entreprise=(MY_INFO.get("nom_entreprise") or "").strip(),
-        adresse=(MY_INFO.get("adresse") or "").strip(),
-        email=(MY_INFO.get("email") or "").strip(),
-        tel=(MY_INFO.get("telephone") or "").strip(),
-    )
-
-
 def _improve_windows_ui():
     try:
         from ctypes import windll  # type: ignore
@@ -248,7 +230,6 @@ def main():
                 root.destroy()
                 return
             init_db()
-            ensure_my_info_in_db()
         except Exception as e:
             try:
                 messagebox.showerror(

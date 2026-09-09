@@ -194,19 +194,49 @@ def save_client(prenom, nom, nom_entreprise, adresse, email, telephone):
         conn.close()
 
 def update_client(cid, prenom=None, nom=None, nom_entreprise=None, adresse=None, email=None, telephone=None):
+    """Écrit la fiche telle qu'elle est fournie, y compris les champs vidés.
+
+    (Contrairement à `find_or_create_client`, qui complète une fiche existante
+    sans jamais effacer : ici l'utilisateur édite explicitement le client et
+    doit pouvoir supprimer un e-mail ou une adresse erronés.)"""
     conn = get_conn()
     try:
         with conn.cursor() as c:
             c.execute("""
                 UPDATE clients SET
-                    prenom = COALESCE(NULLIF(%s,''), prenom),
-                    nom = COALESCE(NULLIF(%s,''), nom),
-                    nom_entreprise = COALESCE(NULLIF(%s,''), nom_entreprise),
-                    adresse = COALESCE(NULLIF(%s,''), adresse),
-                    email = COALESCE(NULLIF(%s,''), email),
-                    telephone = COALESCE(NULLIF(%s,''), telephone)
+                    prenom = %s,
+                    nom = %s,
+                    nom_entreprise = %s,
+                    adresse = %s,
+                    email = %s,
+                    telephone = %s
                 WHERE id=%s
-            """, (prenom, nom, nom_entreprise, adresse, email, telephone, cid))
+            """, (prenom or "", nom or "", nom_entreprise or "", adresse or "",
+                  email or "", telephone or "", cid))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def count_invoices_for_client(cid):
+    conn = get_conn()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT COUNT(*) FROM invoices WHERE client_id=%s", (cid,))
+            return c.fetchone()[0] or 0
+    finally:
+        conn.close()
+
+
+def delete_client(cid):
+    """Supprime un client. Lève ValueError s'il a encore des factures."""
+    n = count_invoices_for_client(cid)
+    if n:
+        raise ValueError(f"Ce client a encore {n} facture(s) : supprime-les d'abord.")
+    conn = get_conn()
+    try:
+        with conn.cursor() as c:
+            c.execute("DELETE FROM clients WHERE id=%s", (cid,))
             conn.commit()
     finally:
         conn.close()
@@ -375,6 +405,18 @@ def update_invoice(invoice_id, client_id=None, date=None, subtotal=None, tva=Non
             return invoice_id
     finally:
         conn.close()
+
+def delete_invoice(invoice_id):
+    """Supprime la facture et ses lignes. Le PDF déjà généré reste sur le disque."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as c:
+            c.execute("DELETE FROM items WHERE invoice_id=%s", (invoice_id,))
+            c.execute("DELETE FROM invoices WHERE id=%s", (invoice_id,))
+            conn.commit()
+    finally:
+        conn.close()
+
 
 def set_pdf_path(invoice_id, pdf_path):
     conn = get_conn()

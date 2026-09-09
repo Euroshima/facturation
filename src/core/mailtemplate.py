@@ -1,6 +1,7 @@
 # src/core/mailtemplate.py — modèle d'e-mail réutilisable (sujet + corps)
 """
-Un seul modèle global, enregistré dans facturation.ini [email_template].
+Deux modèles globaux enregistrés dans facturation.ini : l'envoi normal
+([email_template]) et la relance d'impayé ([email_template_relance]).
 Placeholders disponibles dans le sujet et le corps : voir PLACEHOLDERS.
 La substitution est tolérante : un placeholder inconnu est laissé tel quel,
 il ne fait jamais planter l'envoi.
@@ -18,6 +19,25 @@ DEFAULT_BODY = (
     "{societe}"
 )
 
+DEFAULT_RELANCE_SUBJECT = "Relance — facture {facture} échue depuis le {echeance}"
+DEFAULT_RELANCE_BODY = (
+    "Bonjour,\n\n"
+    "Sauf erreur de notre part, la facture {facture} d'un montant de {total}, "
+    "échue le {echeance}, reste impayée à ce jour ({retard} jours de retard).\n\n"
+    "Nous vous remercions de bien vouloir procéder à son règlement. "
+    "Si le paiement a été effectué entre-temps, merci de ne pas tenir compte "
+    "de ce message.\n\n"
+    "Cordialement,\n"
+    "{societe}"
+)
+
+# clé de modèle -> (section ini, sujet par défaut, corps par défaut, libellé)
+KINDS = {
+    "facture": (SECTION, DEFAULT_SUBJECT, DEFAULT_BODY, "Envoi de facture"),
+    "relance": ("email_template_relance", DEFAULT_RELANCE_SUBJECT,
+                DEFAULT_RELANCE_BODY, "Relance d'impayé"),
+}
+
 # nom -> description (affichée dans la fenêtre d'édition)
 PLACEHOLDERS = {
     "facture": "Numéro de facture",
@@ -26,6 +46,7 @@ PLACEHOLDERS = {
     "total": "Montant TTC (ex. 120,00 €)",
     "date": "Date d'émission (JJ/MM/AAAA)",
     "echeance": "Date d'échéance (JJ/MM/AAAA)",
+    "retard": "Jours de retard (0 si dans les temps)",
 }
 
 
@@ -34,21 +55,23 @@ class _SafeDict(dict):
         return "{" + key + "}"
 
 
-def load_template():
-    """Retourne (sujet, corps). Valeurs enregistrées, sinon défauts."""
-    data = load_section(SECTION)
-    subject = (data.get("subject") or "").strip() or DEFAULT_SUBJECT
+def load_template(kind: str = "facture"):
+    """Retourne (sujet, corps) du modèle demandé. Enregistrés, sinon défauts."""
+    section, def_subject, def_body, _ = KINDS.get(kind, KINDS["facture"])
+    data = load_section(section)
+    subject = (data.get("subject") or "").strip() or def_subject
     raw_body = data.get("body")
-    body = raw_body.replace("\\n", "\n") if raw_body else DEFAULT_BODY
+    body = raw_body.replace("\\n", "\n") if raw_body else def_body
     return subject, body
 
 
-def save_template(subject: str, body: str) -> str:
-    subject = (subject or "").strip() or DEFAULT_SUBJECT
-    body = body if (body or "").strip() else DEFAULT_BODY
+def save_template(subject: str, body: str, kind: str = "facture") -> str:
+    section, def_subject, def_body, _ = KINDS.get(kind, KINDS["facture"])
+    subject = (subject or "").strip() or def_subject
+    body = body if (body or "").strip() else def_body
     # Les retours à la ligne sont stockés en littéral \n pour éviter tout
     # souci de valeur multiligne dans le .ini.
-    return save_section(SECTION, {
+    return save_section(section, {
         "subject": subject.replace("\n", " ").strip(),
         "body": body.replace("\r\n", "\n").replace("\n", "\\n"),
     })

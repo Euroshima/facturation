@@ -142,6 +142,9 @@ class TabCreate(ttk.Frame):
         self.btn_cancel_edit = ttk.Button(actions, text="Annuler édition", command=self.clear_all, state="disabled")
         self.btn_cancel_edit.pack(side="left")
         ttk.Button(actions, text="Tout effacer", command=self.clear_all).pack(side="left", padx=6)
+        self.var_keep_client = tk.BooleanVar(value=True)
+        ttk.Checkbutton(actions, text="Garder le client après création",
+                        variable=self.var_keep_client).pack(side="left", padx=12)
 
     # ----------------- Recherche client -----------------
     def _on_client_lookup_key(self, event):
@@ -362,7 +365,7 @@ class TabCreate(ttk.Frame):
 
         if messagebox.askyesno("Facture créée", f"Facture {inv_obj['facture_num']} enregistrée.\nOuvrir le PDF ?"):
             self.controller.open_path(pdf_path)
-        self.clear_all()
+        self.clear_all(keep_client=self.var_keep_client.get())
 
     def create_invoice_and_email(self):
         """Génère le PDF, enregistre la facture, puis ouvre la fenêtre d'envoi."""
@@ -380,7 +383,7 @@ class TabCreate(ttk.Frame):
             pdf_path=pdf_path,
             context=invoice_email_context(inv_obj, client_row),
         )
-        self.clear_all()
+        self.clear_all(keep_client=self.var_keep_client.get())
 
     # ----------------- Sauvegarder modifications facture -----------------
     def save_edit(self):
@@ -465,20 +468,23 @@ class TabCreate(ttk.Frame):
         self.refresh_totals()
 
     # ----------------- Tout effacer -----------------
-    def clear_all(self):
+    def clear_all(self, keep_client=False):
+        """Réinitialise le formulaire. `keep_client` conserve le bloc client
+        pour enchaîner plusieurs factures sur le même client."""
         self.current_invoice_id = None
         self.btn_update.config(state="disabled")
         self.btn_cancel_edit.config(state="disabled")
 
-        self.controller.var_c_prenom.set("")
-        self.controller.var_c_nom.set("")
-        self.controller.var_c_ent.set("")
-        self.controller.var_c_addr.set("")
-        self.controller.var_c_email.set("")
-        self.controller.var_c_tel.set("")
+        if not keep_client:
+            self.controller.var_c_prenom.set("")
+            self.controller.var_c_nom.set("")
+            self.controller.var_c_ent.set("")
+            self.controller.var_c_addr.set("")
+            self.controller.var_c_email.set("")
+            self.controller.var_c_tel.set("")
+            self.var_client_lookup.set("")
         self.controller.var_tva.set("0")
         self.controller.var_notes.set("")
-        self.var_client_lookup.set("")
         self._suggest.hide()
 
         self.var_i_desc.set("")

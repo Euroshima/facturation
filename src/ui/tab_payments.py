@@ -6,6 +6,8 @@ from core.settings import CURRENCY, MY_INFO
 from core.db import list_invoices_by_payment, mark_invoice_paid, mark_invoice_unpaid
 from pdf.pdfgen import _parse_date, _fmt_date
 from .widgets import make_sortable
+from .invoice_actions import regenerate_pdf
+from .send_email_dialog import show_send_email_dialog, invoice_email_context
 
 
 def _echeance(date_str):
@@ -35,7 +37,8 @@ class TabPayments(ttk.Frame):
 
         ttk.Button(bar, text="Marquer payée", command=self._mark_paid).pack(side="left")
         ttk.Button(bar, text="Marquer non payée", command=self._mark_unpaid).pack(side="left", padx=6)
-        ttk.Button(bar, text="Rafraîchir", command=self.refresh).pack(side="left")
+        ttk.Button(bar, text="Relancer par e-mail", command=self._relance_selected).pack(side="left")
+        ttk.Button(bar, text="Rafraîchir", command=self.refresh).pack(side="left", padx=6)
 
         self.var_show_paid = tk.BooleanVar(value=False)
         ttk.Checkbutton(bar, text="Afficher aussi les payées",
@@ -130,6 +133,27 @@ class TabPayments(ttk.Frame):
         except Exception as e:
             return messagebox.showerror("Paiements", f"Échec de l'enregistrement :\n{e}")
         self.refresh()
+
+    def _relance_selected(self):
+        sel = self.tree.selection()
+        if not sel:
+            return messagebox.showinfo("Relance", "Sélectionne la facture à relancer.")
+        inv_id = self.tree.item(sel[0], "values")[0]
+        try:
+            pdf_path, inv, client = regenerate_pdf(inv_id)
+        except Exception as e:
+            return messagebox.showerror("Relance", f"Impossible de préparer le PDF :\n{e}")
+        if not pdf_path:
+            return messagebox.showerror("Relance", "Facture introuvable en base.")
+
+        show_send_email_dialog(
+            self.winfo_toplevel(),
+            facture_num=inv.get("facture_num"),
+            to_addr=(client or {}).get("email", ""),
+            pdf_path=pdf_path,
+            context=invoice_email_context(inv, client),
+            template="relance",
+        )
 
     def _mark_unpaid(self):
         ids = self._selected_ids("remettre en impayée")
