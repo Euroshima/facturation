@@ -57,11 +57,22 @@ def send_via_smtp(to_addr, subject, body, attachment_path=None):
     from_addr = (c.get("from_addr") or user).strip()
     security = (c.get("security") or "starttls").strip().lower()
 
-    msg = EmailMessage()
-    msg["From"] = from_addr
-    msg["To"] = to_addr
-    msg["Subject"] = subject
-    msg.set_content(body or "")
+    if user and security not in ("ssl", "starttls"):
+        return False, ("Connexion non chiffrée refusée : l'identifiant et le mot de passe "
+                       "partiraient en clair. Choisis la sécurité « starttls » ou « ssl ».")
+
+    to_addr = (to_addr or "").strip()
+    if not to_addr or any(ch in to_addr + from_addr for ch in "\r\n"):
+        return False, "Adresse e-mail invalide."
+
+    try:
+        msg = EmailMessage()
+        msg["From"] = from_addr
+        msg["To"] = to_addr
+        msg["Subject"] = (subject or "").replace("\r", " ").replace("\n", " ")
+        msg.set_content(body or "")
+    except Exception as e:
+        return False, f"Message invalide : {e}"
 
     if attachment_path and os.path.isfile(attachment_path):
         try:
