@@ -20,8 +20,39 @@ from reportlab.platypus import (
 
 from core.settings import MY_INFO, CURRENCY
 
-_DEFAULT_RIB = "FR76 1080 7004 3362 2214 6480 324"
 _NBSP = " "  # espace insécable (présente dans WinAnsi / Helvetica)
+
+
+class CompanyInfoError(ValueError):
+    """Identité de l'entreprise incomplète : la facture ne doit pas partir."""
+
+
+_REQUIRED_COMPANY = (
+    ("nom_entreprise", "Nom / Raison sociale"),
+    ("adresse", "Adresse"),
+    ("siret", "SIRET"),
+    ("iban", "IBAN"),
+)
+
+
+def missing_company_fields():
+    """Libellés des champs obligatoires non renseignés (Paramètres → Mon entreprise)."""
+    missing = []
+    for key, label in _REQUIRED_COMPANY:
+        value = MY_INFO.get(key) or (MY_INFO.get("rib") if key == "iban" else "")
+        if key == "nom_entreprise" and not value:
+            value = MY_INFO.get("nom")
+        if not str(value or "").strip():
+            missing.append(label)
+    return missing
+
+
+def ensure_company_info():
+    missing = missing_company_fields()
+    if missing:
+        raise CompanyInfoError(
+            "Informations de l'entreprise incomplètes : " + ", ".join(missing)
+            + ".\nRenseigne-les dans Paramètres → Mon entreprise.")
 
 
 # --- Polices -----------------------------------------------------------------
@@ -162,7 +193,7 @@ class _NumberedCanvas(_canvas.Canvas):
 def _make_on_page(invoice):
     num = str(invoice.get("facture_num", "") or "")
     issuer = MY_INFO.get("nom_entreprise") or MY_INFO.get("nom") or ""
-    iban = _fmt_iban(MY_INFO.get("iban")) or (MY_INFO.get("rib") or _DEFAULT_RIB)
+    iban = _fmt_iban(MY_INFO.get("iban") or MY_INFO.get("rib"))
     bic = (MY_INFO.get("bic") or "").strip()
     extra = (MY_INFO.get("pied_de_page") or "").strip()
 
@@ -401,6 +432,7 @@ def _legal_block(rate, tva):
 # --- Point d'entrée --------------------------------------------------------
 
 def create_pdf(invoice, client, items, path):
+    ensure_company_info()
     doc = SimpleDocTemplate(
         path, pagesize=A4,
         leftMargin=_MARGIN, rightMargin=_MARGIN,

@@ -211,8 +211,19 @@ def init_db():
             -- Suivi des règlements : NULL = facture non payée, sinon date du
             -- paiement. Ajouté après coup, d'où la migration en place.
             ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at TEXT;
+            -- Taux de TVA appliqué, conservé tel que saisi : le déduire de
+            -- tva/subtotal donne un taux faux dès que les centimes arrondissent.
+            ALTER TABLE invoices ADD COLUMN IF NOT EXISTS tva_rate NUMERIC(6,3);
+            -- Compteur de numéros de facture par jour : ne redescend jamais,
+            -- même si une facture est supprimée (pas de réutilisation de numéro).
+            CREATE TABLE IF NOT EXISTS invoice_counters(
+                day TEXT PRIMARY KEY,
+                last_seq INTEGER NOT NULL
+            );
         """)
         conn.commit()
+
+    _migrate_money_and_dates(conn)
 
     _dedupe_clients_core(conn)
 
@@ -244,9 +255,94 @@ def init_db():
             conn.commit()
     conn.close()
 
+def _migrate_money_and_dates(conn):
+    """Convertit les colonnes REAL en NUMERIC(12,2) et les dates TEXT en DATE.
+
+    Idempotent, et sans danger : si une valeur existante ne se convertit pas
+    (date dans un format inattendu), la transaction est annulée et la colonne
+    reste telle quelle ; le reste de l'application accepte les deux types."""
+    wanted = [
+        ("invoices", "subtotal", "numeric", "NUMERIC(12,2)", "ROUND(subtotal::numeric, 2)"),
+        ("invoices", "tva", "numeric", "NUMERIC(12,2)", "ROUND(tva::numeric, 2)"),
+        ("invoices", "total", "numeric", "NUMERIC(12,2)", "ROUND(total::numeric, 2)"),
+        ("invoices", "date", "date", "DATE", "NULLIF(trim(date), '')::date"),
+        ("invoices", "paid_at", "date", "DATE", "NULLIF(trim(paid_at), '')::date"),
+        ("items", "qty", "numeric", "NUMERIC(12,3)", "ROUND(qty::numeric, 3)"),
+        ("items", "price", "numeric", "NUMERIC(12,2)", "ROUND(price::numeric, 2)"),
+        ("items", "total", "numeric", "NUMERIC(12,2)", "ROUND(total::numeric, 2)"),
+    ]
+    with conn.cursor() as c:
+        c.execute("""
+            SELECT table_name, column_name, data_type
+            FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name IN ('invoices', 'items')
+        """)
+        current = {(t, col): typ for t, col, typ in c.fetchall()}
+    conn.commit()
+
+    for table, col, target_type, sql_type, using in wanted:
+        if current.get((table, col)) in (None, target_type):
+            continue
+        try:
+            with conn.cursor() as c:
+                c.execute(f'ALTER TABLE {table} ALTER COLUMN "{col}" TYPE {sql_type} USING {using}')
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            _console(f"Migration {table}.{col} -> {sql_type} ignorée : {e}")
+
+
 # ---------- Utils ----------
+def _dec(x):
+    """Decimal depuis un nombre « tel qu'affiché » : Decimal(2.675) prendrait
+    la valeur binaire du float (2.67499…) et arrondirait mal."""
+    if isinstance(x, Decimal):
+        return x
+    return Decimal(str(x if x is not None else 0))
+
+
 def money(x):
-    return float(Decimal(x).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    return float(_dec(x).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def mul_money(a, b):
+    """a × b arrondi au centime, calculé en décimal."""
+    return money(_dec(a) * _dec(b))
+
+
+def sum_money(values):
+    return money(sum((_dec(v) for v in values), Decimal(0)))
+
+
+def percent_of(amount, pct):
+    """pct % de amount, arrondi au centime."""
+    return money(_dec(amount) * _dec(pct) / Decimal(100))
+
+
+_COMMON_TVA_RATES = (0.0, 2.1, 5.5, 8.5, 10.0, 20.0)
+
+
+def invoice_tva_rate(inv):
+    """Taux de TVA d'une facture : celui enregistré, sinon (factures anciennes)
+    déduit de tva/subtotal et ramené au taux français usuel le plus proche s'il
+    en est à moins de 0,5 point."""
+    stored = inv.get("tva_rate")
+    if stored is not None:
+        return float(stored)
+    try:
+        subtotal = float(inv.get("subtotal") or 0)
+        if not subtotal:
+            return 0.0
+        derived = float(inv.get("tva") or 0) / subtotal * 100
+    except (TypeError, ValueError):
+        return 0.0
+    nearest = min(_COMMON_TVA_RATES, key=lambda r: abs(r - derived))
+    return nearest if abs(nearest - derived) < 0.5 else round(derived, 2)
+
+
+def _like_escape(term):
+    """Échappe % et _ saisis par l'utilisateur (backslash = échappement par défaut)."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 # ---------- Clients ----------
 def save_client(prenom, nom, nom_entreprise, adresse, email, telephone):
@@ -369,7 +465,7 @@ def find_or_create_client(prenom, nom, entreprise, adresse, email, tel):
         conn.close()
 
 def search_clients(term, limit=50):
-    like = f"%{(term or '').lower()}%"
+    like = f"%{_like_escape((term or '').lower())}%"
     # Recherche téléphone : on compare les chiffres seuls, avec jokers.
     tel_digits = re.sub(r"\D+", "", term or "")
     tel_like = f"%{tel_digits}%" if tel_digits else like
@@ -407,34 +503,43 @@ def _insert_items(cur, invoice_id, items):
     )
 
 
-def generate_invoice_number():
-    today = datetime.now().strftime("%Y%m%d")
-    conn = get_conn()
-    try:
-        with conn.cursor() as c:
-            c.execute("SELECT COUNT(*) FROM invoices WHERE facture_num LIKE %s", (today + "%",))
-            seq = (c.fetchone()[0] or 0) + 1
-            return f"{today}-{seq:04d}"
-    finally:
-        conn.close()
+def _next_invoice_number(cur):
+    """Numéro suivant du jour (AAAAMMJJ-NNNN), dans la transaction de l'appelant.
 
-def insert_invoice(client_id, facture_num, date, subtotal, tva, total, notes, items):
+    Le compteur est verrouillé par la ligne du jour : deux postes simultanés
+    obtiennent deux numéros différents, et un numéro n'est jamais redonné après
+    une suppression. S'il n'existe pas encore, il démarre après le plus grand
+    numéro déjà émis ce jour-là."""
+    today = datetime.now().strftime("%Y%m%d")
+    cur.execute("""
+        INSERT INTO invoice_counters (day, last_seq)
+        SELECT %s, COALESCE(MAX(substring(facture_num from '-([0-9]+)$')::int), 0) + 1
+        FROM invoices WHERE facture_num LIKE %s
+        ON CONFLICT (day) DO UPDATE SET last_seq = invoice_counters.last_seq + 1
+        RETURNING last_seq
+    """, (today, today + "-%"))
+    return f"{today}-{cur.fetchone()[0]:04d}"
+
+
+def insert_invoice(client_id, date, subtotal, tva, total, notes, items, tva_rate=None):
+    """Crée la facture avec son numéro. Retourne (invoice_id, facture_num)."""
     conn = get_conn()
     try:
         with conn.cursor() as c:
+            facture_num = _next_invoice_number(c)
             c.execute("""
-                INSERT INTO invoices (facture_num, client_id, date, subtotal, tva, total, notes, pdf_path)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,'')
+                INSERT INTO invoices (facture_num, client_id, date, subtotal, tva, total, notes, pdf_path, tva_rate)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,'',%s)
                 RETURNING id
-            """, (facture_num, client_id, date, subtotal, tva, total, notes))
+            """, (facture_num, client_id, date, subtotal, tva, total, notes, tva_rate))
             invoice_id = c.fetchone()[0]
             _insert_items(c, invoice_id, items)
             conn.commit()
-            return invoice_id
+            return invoice_id, facture_num
     finally:
         conn.close()
 
-def update_invoice(invoice_id, client_id=None, date=None, subtotal=None, tva=None, total=None, notes=None, items=None):
+def update_invoice(invoice_id, client_id=None, date=None, subtotal=None, tva=None, total=None, notes=None, items=None, tva_rate=None):
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:
@@ -451,12 +556,13 @@ def update_invoice(invoice_id, client_id=None, date=None, subtotal=None, tva=Non
             new_tva = tva if tva is not None else invoice["tva"]
             new_total = total if total is not None else invoice["total"]
             new_notes = notes if notes is not None else invoice["notes"]
+            new_tva_rate = tva_rate if tva_rate is not None else invoice["tva_rate"]
 
             c.execute("""
                 UPDATE invoices
-                SET client_id=%s, date=%s, subtotal=%s, tva=%s, total=%s, notes=%s
+                SET client_id=%s, date=%s, subtotal=%s, tva=%s, total=%s, notes=%s, tva_rate=%s
                 WHERE id=%s
-            """, (new_client_id, new_date, new_subtotal, new_tva, new_total, new_notes, invoice_id))
+            """, (new_client_id, new_date, new_subtotal, new_tva, new_total, new_notes, new_tva_rate, invoice_id))
 
             # Met à jour les items si fournis
             if items is not None:
@@ -577,7 +683,7 @@ def mark_invoices_unpaid(invoice_ids):
 
 def search_invoices(search_term):
     term = (search_term or "").strip()
-    like = f"%{term}%"
+    like = f"%{_like_escape(term)}%"
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as c:

@@ -1,6 +1,6 @@
 # src/ui/invoice_actions.py — opérations sur une facture partagées entre onglets
 from core.paths import invoice_pdf_path
-from core.db import get_invoice_with_items, set_pdf_path
+from core.db import get_invoice_with_items, set_pdf_path, invoice_tva_rate
 from pdf.pdfgen import create_pdf
 
 
@@ -14,10 +14,7 @@ def regenerate_pdf(invoice_id):
     items_dict = [{"description": it["description"], "qty": float(it["qty"]),
                    "price": float(it["price"]), "unit": it.get("unit", "kg"),
                    "total": float(it["total"])} for it in items]
-    try:
-        tva_rate = (float(inv.get("tva", 0)) / float(inv.get("subtotal", 1))) * 100 if inv.get("subtotal") else 0.0
-    except Exception:
-        tva_rate = 0.0
+    tva_rate = invoice_tva_rate(inv)
     inv_obj = {
         "facture_num": inv.get("facture_num"),
         "date": inv.get("date"),

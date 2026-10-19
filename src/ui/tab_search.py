@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from core.settings import CURRENCY
-from core.db import search_invoices, get_invoice_with_items, delete_invoice
+from core.db import search_invoices, get_invoice_with_items, delete_invoice, invoice_tva_rate
 from .widgets import make_sortable
 from .invoice_actions import regenerate_pdf
 from .send_email_dialog import show_send_email_dialog, invoice_email_context
@@ -94,13 +94,7 @@ class TabSearch(ttk.Frame):
         c.controller.var_c_email.set(client.get("email",""))
         c.controller.var_c_tel.set(client.get("telephone",""))
         c.controller.var_notes.set(inv.get("notes",""))
-        try:
-            if inv.get("subtotal"):
-                c.controller.var_tva.set(f"{(float(inv.get('tva',0))/float(inv.get('subtotal',1)))*100:.2f}")
-            else:
-                c.controller.var_tva.set("0")
-        except Exception:
-            c.controller.var_tva.set("0")
+        c.controller.var_tva.set(f"{invoice_tva_rate(inv):g}")
 
         # Tableau articles
         c.items.clear()

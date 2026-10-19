@@ -5,8 +5,10 @@ from core.settings import CURRENCY
 from core.paths import invoice_pdf_path
 from core.db import (
     money,
+    mul_money,
+    sum_money,
+    percent_of,
     find_or_create_client,
-    generate_invoice_number,
     insert_invoice,
     update_invoice,
     set_pdf_path,
@@ -14,7 +16,7 @@ from core.db import (
     search_clients,
     get_conn,
 )
-from pdf.pdfgen import create_pdf
+from pdf.pdfgen import create_pdf, missing_company_fields
 from .send_email_dialog import show_send_email_dialog, invoice_email_context
 from .widgets import SuggestPopup
 import psycopg2.extras
@@ -200,7 +202,7 @@ class TabCreate(ttk.Frame):
         except Exception:
             return messagebox.showerror("Format", "Quantité ou prix invalide")
         unit = self.var_i_unit.get() or "kg"
-        total = money(qty * price)
+        total = mul_money(qty, price)
         item = {"description": desc, "qty": qty, "unit": unit, "price": price, "total": total}
         self.items.append(item)
         self.tree.insert(
@@ -262,7 +264,7 @@ class TabCreate(ttk.Frame):
                 return messagebox.showerror("Erreur", "Quantité ou prix invalide")
             unit_val = e_unit.get() or "kg"
             desc_val = e_desc.get().strip() or "Article"
-            total_val = money(qty_val * price_val)
+            total_val = mul_money(qty_val, price_val)
 
             self.items[idx] = {
                 "description": desc_val,
@@ -281,25 +283,31 @@ class TabCreate(ttk.Frame):
 
     # ----------------- Totaux -----------------
     def refresh_totals(self):
-        subtotal = money(sum(i["total"] for i in self.items)) if self.items else 0.0
+        subtotal = sum_money(i["total"] for i in self.items)
         try:
             tva_pct = float(self.controller.var_tva.get() or 0.0)
         except Exception:
             tva_pct = 0.0
-        tva_amount = money(subtotal * (tva_pct / 100.0))
+        tva_amount = percent_of(subtotal, tva_pct)
         total = money(subtotal + tva_amount)
         if self.lbl_ht and self.lbl_tva and self.lbl_ttc:
             self.lbl_ht.config(text=f"HT: {subtotal:.2f} {CURRENCY}")
             self.lbl_tva.config(text=f"TVA: {tva_amount:.2f} {CURRENCY}")
             self.lbl_ttc.config(text=f"TTC: {total:.2f} {CURRENCY}")
 
+    def _tva_rate(self):
+        try:
+            return float(self.controller.var_tva.get() or 0.0)
+        except ValueError:
+            return 0.0
+
     def _collect_totals(self):
-        subtotal = money(sum(i["total"] for i in self.items))
+        subtotal = sum_money(i["total"] for i in self.items)
         try:
             tva_pct = float(self.controller.var_tva.get() or 0.0)
         except Exception:
             tva_pct = 0.0
-        tva_amount = money(subtotal * (tva_pct / 100.0))
+        tva_amount = percent_of(subtotal, tva_pct)
         total = money(subtotal + tva_amount)
         return subtotal, tva_amount, total
 
@@ -315,7 +323,18 @@ class TabCreate(ttk.Frame):
         )
 
     # ----------------- Création nouvelle facture -----------------
+    def _company_ok(self) -> bool:
+        missing = missing_company_fields()
+        if missing:
+            messagebox.showerror(
+                "Entreprise",
+                "Informations de l'entreprise incomplètes : " + ", ".join(missing)
+                + ".\nRenseigne-les dans Paramètres → Mon entreprise.")
+        return not missing
+
     def _form_is_valid(self) -> bool:
+        if not self._company_ok():
+            return False
         if not (self.controller.var_c_nom.get().strip() or self.controller.var_c_ent.get().strip()):
             messagebox.showerror("Client", "Nom ou Entreprise requis pour créer une facture.")
             return False
@@ -328,10 +347,12 @@ class TabCreate(ttk.Frame):
         """Enregistre la facture en base et génère son PDF.
         Retourne (inv_obj, client_row, pdf_path)."""
         cid = self._get_current_client_id()
-        facture_num = generate_invoice_number()
         date_str = datetime.now().strftime("%Y-%m-%d")
         subtotal, tva_amount, total = self._collect_totals()
-        inv_id = insert_invoice(cid, facture_num, date_str, subtotal, tva_amount, total, self.controller.var_notes.get().strip(), self.items)
+        inv_id, facture_num = insert_invoice(
+            cid, date_str, subtotal, tva_amount, total,
+            self.controller.var_notes.get().strip(), self.items,
+            tva_rate=self._tva_rate())
 
         conn = get_conn()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -348,7 +369,7 @@ class TabCreate(ttk.Frame):
             "tva": tva_amount,
             "total": total,
             "notes": self.controller.var_notes.get().strip(),
-            "tva_rate": float(self.controller.var_tva.get() or 0.0),
+            "tva_rate": self._tva_rate(),
         }
 
         create_pdf(inv_obj, client_row, self.items, pdf_path)
@@ -389,6 +410,8 @@ class TabCreate(ttk.Frame):
     def save_edit(self):
         if not self.current_invoice_id:
             return messagebox.showwarning("Modifier", "Aucune facture en édition")
+        if not self._company_ok():
+            return
         if not self.items:
             return messagebox.showerror("Articles", "Ajoute au moins une ligne")
         try:
@@ -409,7 +432,8 @@ class TabCreate(ttk.Frame):
                 tva_amount,
                 total,
                 self.controller.var_notes.get().strip(),
-                self.items
+                self.items,
+                tva_rate=self._tva_rate(),
             )
 
             conn = get_conn()
@@ -427,7 +451,7 @@ class TabCreate(ttk.Frame):
                 "tva": tva_amount,
                 "total": total,
                 "notes": self.controller.var_notes.get().strip(),
-                "tva_rate": float(self.controller.var_tva.get() or 0.0),
+                "tva_rate": self._tva_rate(),
             }
 
             create_pdf(inv_obj, client_row, self.items, pdf_path)
@@ -457,7 +481,7 @@ class TabCreate(ttk.Frame):
 
         for item in items:
             self.items.append(item)
-            total = money(item["qty"]*item["price"])
+            total = mul_money(item["qty"], item["price"])
             self.tree.insert("", "end", values=(
                 item["description"],
                 f"{item['qty']:.2f}".rstrip("0").rstrip("."),

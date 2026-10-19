@@ -1,18 +1,12 @@
 # === Paramètres de l'app ===
 
-# Valeurs par défaut de l'identité entreprise (imprimées sur chaque facture).
-# Elles sont surchargées par ce que l'utilisateur saisit dans
-# Paramètres → Mon entreprise (stocké dans %APPDATA%\Facturation\facturation.ini).
-_DEFAULT_MY_INFO = {
-    "nom_entreprise": "Boisset Didier",
-    "nom": "Boisset Didier",
-    "adresse": "3B route d'orleans\n89113 Fleury-la-vallée",
-    "siret": "41337828200029",
-    "email": "dimanche.boisset@gmail.com",
-    "telephone": "06 12 77 26 17",
-    # Optionnels : iban, bic, tva_intracom, delai_paiement_jours,
-    # mentions_legales, pied_de_page, reference_client
-}
+# Identité de l'entreprise (imprimée sur chaque facture) : aucune valeur par
+# défaut dans le code, tout vient de Paramètres → Mon entreprise (stocké dans
+# %APPDATA%\Facturation\facturation.ini). Une facture n'est créée que si
+# nom, adresse, SIRET et IBAN sont renseignés (voir pdf.pdfgen).
+# Optionnels : bic, tva_intracom, email, telephone, delai_paiement_jours,
+# mentions_legales, pied_de_page, reference_client
+_DEFAULT_MY_INFO = {}
 
 # Clés de l'identité entreprise (ordre d'affichage dans la fenêtre)
 COMPANY_FIELDS = [
@@ -49,9 +43,20 @@ def reload_my_info():
 
 reload_my_info()
 
-# Dossier et base
-DB_FILE = "data/invoices.db"
-PDF_FOLDER = "data/factures_pdf"
+import os
+import sys
+
+
+def _base_dir():
+    """Dossier de l'exe (version installée) ou racine du projet : les PDF ne
+    dépendent pas du dossier depuis lequel l'application est lancée."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
+
+# Dossier des PDF
+PDF_FOLDER = os.path.join(_base_dir(), "data", "factures_pdf")
 
 # Devise à afficher (ex: "€", "CHF", "£", "$")
 CURRENCY = "€"
