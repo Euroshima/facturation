@@ -1,5 +1,27 @@
 # Journal des versions
 
+## v1.8.0 — 19 octobre 2026
+
+Fiabilité et conformité de la facturation.
+
+- **Numéros de facture** : attribués de façon atomique. Deux postes qui créent
+  une facture en même temps n'obtiennent plus le même numéro, et un numéro
+  n'est jamais redonné après une suppression.
+- **TVA** : le taux saisi est enregistré avec la facture. Régénérer ou rouvrir
+  une ancienne facture ne le déduit plus des montants arrondis (plus de
+  « 19,8 % » au lieu de 20 %).
+- **Arrondis** : les montants sont calculés en décimal (2,675 → 2,68).
+- **Base de données** : les montants passent en `NUMERIC` et les dates en
+  `DATE`, par une migration automatique au premier démarrage.
+- **Entreprise** : plus aucune coordonnée ni IBAN par défaut. Nom, adresse,
+  SIRET et IBAN doivent être renseignés dans Paramètres → Mon entreprise pour
+  créer une facture.
+- **E-mail** : adresse invalide refusée proprement, authentification SMTP sans
+  chiffrement refusée.
+- Les PDF sont rangés à côté de l'application, quel que soit le dossier de
+  lancement ; les `%` et `_` saisis dans les recherches sont pris littéralement.
+- La release publie l'empreinte SHA-256 de l'exe (`Facturation.exe.sha256`).
+
 ## v1.7.2 — 9 septembre 2026
 
 Audit complet des lenteurs restantes. Avec une base distante, chaque
